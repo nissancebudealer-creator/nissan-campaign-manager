@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+.input {
+  @apply w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500;
+}

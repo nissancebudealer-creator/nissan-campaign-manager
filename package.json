@@ -1,0 +1,27 @@
+{
+  "name": "marketing-campaign-platform",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev --workspace server",
+    "dev:web": "npm run dev --workspace web",
+    "build:server": "npm run build --workspace server",
+    "build:web": "npm run build --workspace web",
+    "test:server": "npm run test --workspace server",
+    "typecheck:server": "npm run typecheck --workspace server",
+    "typecheck:web": "npm run typecheck --workspace web"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "prisma@6.19.3": true,
+    "esbuild@0.28.2": true,
+    "esbuild@0.21.5": true,
+    "esbuild@0.25.12": true,
+    "fsevents@2.3.3": true
+  }
+}
