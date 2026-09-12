@@ -28,7 +28,8 @@ async function loadModules() {
   const { prisma } = await import("../src/lib/prisma.js");
   const adminService = await import("../src/services/admin.service.js");
   const authService = await import("../src/services/auth.service.js");
-  return { prisma, adminService, authService };
+  const permissionService = await import("../src/services/permission.service.js");
+  return { prisma, adminService, authService, permissionService };
 }
 
 let modules: Awaited<ReturnType<typeof loadModules>>;
@@ -133,14 +134,41 @@ describe("user management", () => {
   });
 });
 
-describe("roles — real, computed grants (not the inert Permission/RolePermission seed data)", () => {
-  it("VIEWER has no write/delete/admin grants; ADMINISTRATOR has all of them", async () => {
+describe("roles — real, database-backed permissions (Permission/RolePermission actually enforced now)", () => {
+  it("VIEWER has only view permissions, no write/delete/admin; ADMINISTRATOR has every permission", async () => {
     const roles = await modules.adminService.listRoles();
     const viewer = roles.find((r) => r.name === "VIEWER")!;
     const administrator = roles.find((r) => r.name === "ADMINISTRATOR")!;
-    expect(viewer.grants).toEqual([]);
-    expect(administrator.grants.length).toBeGreaterThan(0);
-    expect(administrator.grants).toContain("Administration");
+    expect(viewer.permissions.every((p: string) => p.startsWith("view:"))).toBe(true);
+    expect(viewer.permissions).not.toContain("admin:manage");
+    expect(administrator.permissions).toContain("admin:manage");
+    expect(administrator.permissions).toContain("contacts:write");
+  });
+
+  it("grants and revokes a permission for real, and enforces it on the very next check", async () => {
+    // SALES_STAFF is a real, shared role (not disposable test data) — a try/finally guarantees
+    // the grant this test adds is always removed again, even if an assertion above fails first.
+    const { permissionService } = modules;
+    const roles = await modules.adminService.listRoles();
+    const salesStaff = roles.find((r) => r.name === "SALES_STAFF")!;
+
+    expect(await permissionService.roleHasPermission("SALES_STAFF", "campaigns:write")).toBe(false);
+
+    try {
+      await modules.adminService.updateRolePermission(salesStaff.id, "campaigns:write", true, actorId);
+      expect(await permissionService.roleHasPermission("SALES_STAFF", "campaigns:write")).toBe(true);
+    } finally {
+      await modules.adminService.updateRolePermission(salesStaff.id, "campaigns:write", false, actorId);
+    }
+    expect(await permissionService.roleHasPermission("SALES_STAFF", "campaigns:write")).toBe(false);
+  });
+
+  it("refuses to remove admin:manage from ADMINISTRATOR — would lock every admin out", async () => {
+    const roles = await modules.adminService.listRoles();
+    const administrator = roles.find((r) => r.name === "ADMINISTRATOR")!;
+    await expect(
+      modules.adminService.updateRolePermission(administrator.id, "admin:manage", false, actorId),
+    ).rejects.toThrow("lock every admin");
   });
 });
 

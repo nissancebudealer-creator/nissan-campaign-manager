@@ -29,6 +29,10 @@ export const auditLogQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(200).default(50),
 });
 
+export const rolePermissionUpdateSchema = z.object({
+  granted: z.boolean(),
+});
+
 export const sendingLimitSchema = z.object({
   dailyLimit: z.number().int().min(1, "Must be at least 1"),
 });

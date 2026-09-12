@@ -1,8 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
-import { requireAuth, requireRole } from "../middleware/auth.js";
+import { requireAuth, requirePermission } from "../middleware/auth.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { CAN_WRITE_CAMPAIGNS } from "../config/roles.js";
 import * as integrationService from "../services/integration.service.js";
 import * as gmailAuth from "../services/gmailAuth.service.js";
 import * as whatsapp from "../services/whatsapp.service.js";
@@ -33,7 +32,7 @@ integrationRouter.get(
 integrationRouter.get(
   "/gmail/connect",
   requireAuth,
-  requireRole(...CAN_WRITE_CAMPAIGNS),
+  requirePermission("campaigns:write"),
   asyncHandler(async (req, res) => {
     const state = gmailAuth.signConnectState(req.user!.id);
     const authUrl = gmailAuth.getAuthUrl(state);
@@ -44,7 +43,7 @@ integrationRouter.get(
 integrationRouter.post(
   "/gmail/disconnect",
   requireAuth,
-  requireRole(...CAN_WRITE_CAMPAIGNS),
+  requirePermission("campaigns:write"),
   asyncHandler(async (req, res) => {
     await gmailAuth.disconnectGmail(req.user!.id);
     res.status(204).send();
@@ -72,7 +71,7 @@ const senderNameSchema = z.object({ senderName: z.string().trim().min(1).max(78)
 integrationRouter.put(
   "/gmail/sender-name",
   requireAuth,
-  requireRole(...CAN_WRITE_CAMPAIGNS),
+  requirePermission("campaigns:write"),
   asyncHandler(async (req, res) => {
     const { senderName } = senderNameSchema.parse(req.body);
     const integration = await prisma.integration.findFirst({ where: { type: "GMAIL" } });
@@ -137,7 +136,7 @@ const whatsappConfigureSchema = z.object({
 integrationRouter.post(
   "/whatsapp/configure",
   requireAuth,
-  requireRole(...CAN_WRITE_CAMPAIGNS),
+  requirePermission("campaigns:write"),
   asyncHandler(async (req, res) => {
     const input = whatsappConfigureSchema.parse(req.body);
     const { verifiedName, displayPhoneNumber } = await whatsapp.testWhatsAppConnection(
@@ -187,7 +186,7 @@ integrationRouter.post(
 integrationRouter.post(
   "/whatsapp/disconnect",
   requireAuth,
-  requireRole(...CAN_WRITE_CAMPAIGNS),
+  requirePermission("campaigns:write"),
   asyncHandler(async (req, res) => {
     const integration = await prisma.integration.findFirst({ where: { type: "WHATSAPP" } });
     if (!integration) throw new AppError(404, "WhatsApp is not connected");
@@ -218,7 +217,7 @@ const viberConfigureSchema = z.object({
 integrationRouter.post(
   "/viber/configure",
   requireAuth,
-  requireRole(...CAN_WRITE_CAMPAIGNS),
+  requirePermission("campaigns:write"),
   asyncHandler(async (req, res) => {
     const input = viberConfigureSchema.parse(req.body);
     const { name, uri } = await viber.testViberConnection(input.authToken);
@@ -264,7 +263,7 @@ integrationRouter.post(
 integrationRouter.post(
   "/viber/disconnect",
   requireAuth,
-  requireRole(...CAN_WRITE_CAMPAIGNS),
+  requirePermission("campaigns:write"),
   asyncHandler(async (req, res) => {
     const integration = await prisma.integration.findFirst({ where: { type: "VIBER" } });
     if (!integration) throw new AppError(404, "Viber is not connected");

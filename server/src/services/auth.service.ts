@@ -2,7 +2,9 @@ import { prisma } from "../lib/prisma.js";
 import { hashPassword, verifyPassword } from "../utils/password.js";
 import { signAuthToken } from "../utils/jwt.js";
 import { AppError } from "../utils/AppError.js";
-import { ROLES, modulesForRole, type RoleName } from "../config/roles.js";
+import { ROLES, type RoleName } from "../config/roles.js";
+import { getPermissionKeysForRole } from "./permission.service.js";
+import { moduleKeyFromViewPermission } from "../config/permissions.js";
 
 interface RegisterInput {
   email: string;
@@ -16,7 +18,7 @@ interface LoginInput {
   password: string;
 }
 
-function publicUser(user: {
+async function publicUser(user: {
   id: string;
   email: string;
   firstName: string;
@@ -24,6 +26,11 @@ function publicUser(user: {
   isActive: boolean;
   role: { name: string };
 }) {
+  const permissionKeys = await getPermissionKeysForRole(user.role.name as RoleName);
+  const modules = permissionKeys
+    .map(moduleKeyFromViewPermission)
+    .filter((key): key is string => key !== null);
+
   return {
     id: user.id,
     email: user.email,
@@ -31,7 +38,7 @@ function publicUser(user: {
     lastName: user.lastName,
     isActive: user.isActive,
     role: user.role.name,
-    modules: modulesForRole(user.role.name as RoleName),
+    modules,
   };
 }
 
@@ -63,7 +70,7 @@ export async function registerUser(input: RegisterInput) {
   });
 
   const token = signAuthToken({ sub: user.id, email: user.email, role: user.role.name });
-  return { token, user: publicUser(user) };
+  return { token, user: await publicUser(user) };
 }
 
 export async function loginUser(input: LoginInput) {
@@ -84,7 +91,7 @@ export async function loginUser(input: LoginInput) {
   await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
   const token = signAuthToken({ sub: user.id, email: user.email, role: user.role.name });
-  return { token, user: publicUser(user) };
+  return { token, user: await publicUser(user) };
 }
 
 export async function getCurrentUser(userId: string) {

@@ -26,6 +26,11 @@ export const adminApi = {
   deleteUser: (id: string) => api.delete<void>(`/admin/users/${id}`),
 
   listRoles: () => api.get<{ roles: AdminRole[] }>("/admin/roles"),
+  updateRolePermission: (roleId: string, permissionKey: string, granted: boolean) =>
+    api.put<{ roleId: string; permissionKey: string; granted: boolean }>(
+      `/admin/roles/${roleId}/permissions/${encodeURIComponent(permissionKey)}`,
+      { granted },
+    ),
 
   listAuditLogs: (query: AuditLogQuery) => api.get<AuditLogResponse>(`/admin/audit-logs${toQueryString({ ...query })}`),
 

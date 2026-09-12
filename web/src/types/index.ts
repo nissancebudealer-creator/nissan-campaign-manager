@@ -341,8 +341,7 @@ export interface AdminRole {
   name: RoleName;
   description: string | null;
   userCount: number;
-  grants: string[];
-  modules: string[];
+  permissions: string[];
 }
 
 export interface AuditLogEntry {

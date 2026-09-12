@@ -1,7 +1,6 @@
 import { Router } from "express";
-import { requireAuth, requireRole } from "../middleware/auth.js";
+import { requireAuth, requirePermission } from "../middleware/auth.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { CAN_MANAGE_ADMIN } from "../config/roles.js";
 import { brandingUpdateSchema } from "../schemas/settings.schema.js";
 import * as settingsService from "../services/settings.service.js";
 
@@ -20,7 +19,7 @@ settingsRouter.get(
 settingsRouter.put(
   "/branding",
   requireAuth,
-  requireRole(...CAN_MANAGE_ADMIN),
+  requirePermission("admin:manage"),
   asyncHandler(async (req, res) => {
     const input = brandingUpdateSchema.parse(req.body);
     const branding = await settingsService.updateBranding(input, req.user!.id);

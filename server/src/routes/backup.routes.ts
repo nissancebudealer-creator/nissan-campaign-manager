@@ -1,15 +1,14 @@
 import { Router } from "express";
 import multer from "multer";
-import { requireAuth, requireRole } from "../middleware/auth.js";
+import { requireAuth, requirePermission } from "../middleware/auth.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { CAN_MANAGE_ADMIN } from "../config/roles.js";
 import { AppError } from "../utils/AppError.js";
 import { MAX_BACKUP_UPLOAD_BYTES } from "../config/uploads.js";
 import * as backupService from "../services/backup.service.js";
 
 export const backupRouter = Router();
 
-backupRouter.use(requireAuth, requireRole(...CAN_MANAGE_ADMIN));
+backupRouter.use(requireAuth, requirePermission("admin:manage"));
 
 backupRouter.get(
   "/export",

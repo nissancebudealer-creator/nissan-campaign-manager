@@ -6,6 +6,7 @@ import {
   resetPasswordSchema,
   auditLogQuerySchema,
   sendingLimitSchema,
+  rolePermissionUpdateSchema,
 } from "../schemas/admin.schema.js";
 import { AppError } from "../utils/AppError.js";
 
@@ -40,6 +41,17 @@ export async function resetPassword(req: Request, res: Response) {
 export async function listRoles(_req: Request, res: Response) {
   const roles = await adminService.listRoles();
   res.json({ roles });
+}
+
+export async function updateRolePermission(req: Request, res: Response) {
+  const { granted } = rolePermissionUpdateSchema.parse(req.body);
+  const result = await adminService.updateRolePermission(
+    req.params.roleId,
+    req.params.permissionKey,
+    granted,
+    req.user!.id,
+  );
+  res.json(result);
 }
 
 export async function listAuditLogs(req: Request, res: Response) {

@@ -2,21 +2,8 @@ import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
 import { hashPassword } from "../utils/password.js";
 import { recordAudit } from "./audit.service.js";
-import {
-  ROLES,
-  CAN_WRITE_CONTACTS,
-  CAN_DELETE_CONTACTS,
-  CAN_MANAGE_TAGS,
-  CAN_WRITE_SEGMENTS,
-  CAN_DELETE_SEGMENTS,
-  CAN_WRITE_TEMPLATES,
-  CAN_DELETE_TEMPLATES,
-  CAN_WRITE_CAMPAIGNS,
-  CAN_DELETE_CAMPAIGNS,
-  CAN_MANAGE_ADMIN,
-  modulesForRole,
-  type RoleName,
-} from "../config/roles.js";
+import { ROLES } from "../config/roles.js";
+import { getPermissionMatrix, updateRolePermission as updateRolePermissionReal } from "./permission.service.js";
 import { readGmailConfig, encryptGmailConfig } from "./gmailAuth.service.js";
 import { readWhatsAppConfig, encryptWhatsAppConfig } from "./whatsapp.service.js";
 import { readViberConfig, encryptViberConfig } from "./viber.service.js";
@@ -169,39 +156,22 @@ export async function resetUserPassword(id: string, password: string, actorId: s
   await recordAudit({ userId: actorId, action: "USER_PASSWORD_RESET", entityType: "User", entityId: id });
 }
 
-// ---------- Roles & (real, enforced) permissions ----------
-// Permission/RolePermission tables exist in the schema but aren't consulted by any route guard —
-// every route in this app checks role *names* directly (requireRole(...CAN_WRITE_X) in
-// config/roles.ts). Rather than show that inert seed data as if it were live configuration
-// (exactly the kind of fabricated-functionality this project avoids everywhere else — see
-// COMPLIANCE.md), this computes what each role can *actually* do right now, straight from the
-// same arrays every route guard imports.
-const ROUTE_GROUPS: { label: string; roles: RoleName[] }[] = [
-  { label: "Write contacts", roles: CAN_WRITE_CONTACTS },
-  { label: "Delete contacts", roles: CAN_DELETE_CONTACTS },
-  { label: "Manage tags", roles: CAN_MANAGE_TAGS },
-  { label: "Write segments", roles: CAN_WRITE_SEGMENTS },
-  { label: "Delete segments", roles: CAN_DELETE_SEGMENTS },
-  { label: "Write templates", roles: CAN_WRITE_TEMPLATES },
-  { label: "Delete templates", roles: CAN_DELETE_TEMPLATES },
-  { label: "Write campaigns (incl. automation)", roles: CAN_WRITE_CAMPAIGNS },
-  { label: "Delete campaigns", roles: CAN_DELETE_CAMPAIGNS },
-  { label: "Administration", roles: CAN_MANAGE_ADMIN },
-];
-
+// ---------- Roles & (real, enforced, admin-editable) permissions ----------
+// Permission/RolePermission are no longer inert seed data — every route guard queries them live
+// via requirePermission(key) (middleware/auth.ts), and this is the same data the Roles tab reads
+// and, through updateRolePermission below, writes. See config/permissions.ts for the canonical
+// key list and services/permission.service.ts for the query/mutation logic.
 export async function listRoles() {
-  const roles = await prisma.role.findMany({
-    include: { _count: { select: { users: true } } },
-    orderBy: { name: "asc" },
-  });
-  return roles.map((role) => ({
-    id: role.id,
-    name: role.name,
-    description: role.description,
-    userCount: role._count.users,
-    grants: ROUTE_GROUPS.filter((group) => group.roles.includes(role.name as RoleName)).map((g) => g.label),
-    modules: modulesForRole(role.name as RoleName),
-  }));
+  return getPermissionMatrix();
+}
+
+export async function updateRolePermission(
+  roleId: string,
+  permissionKey: string,
+  granted: boolean,
+  actorId: string,
+) {
+  return updateRolePermissionReal(roleId, permissionKey, granted, actorId);
 }
 
 // ---------- Audit log ----------

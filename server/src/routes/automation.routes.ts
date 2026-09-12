@@ -1,8 +1,7 @@
 import { Router } from "express";
 import * as automationController from "../controllers/automation.controller.js";
-import { requireAuth, requireRole } from "../middleware/auth.js";
+import { requireAuth, requirePermission } from "../middleware/auth.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { CAN_DELETE_CAMPAIGNS, CAN_WRITE_CAMPAIGNS } from "../config/roles.js";
 
 export const automationRouter = Router();
 
@@ -12,18 +11,18 @@ automationRouter.get("/", asyncHandler(automationController.list));
 automationRouter.get("/:id", asyncHandler(automationController.get));
 automationRouter.get("/:id/enrollments", asyncHandler(automationController.listEnrollments));
 
-automationRouter.post("/", requireRole(...CAN_WRITE_CAMPAIGNS), asyncHandler(automationController.create));
-automationRouter.put("/:id", requireRole(...CAN_WRITE_CAMPAIGNS), asyncHandler(automationController.update));
-automationRouter.delete("/:id", requireRole(...CAN_DELETE_CAMPAIGNS), asyncHandler(automationController.remove));
+automationRouter.post("/", requirePermission("campaigns:write"), asyncHandler(automationController.create));
+automationRouter.put("/:id", requirePermission("campaigns:write"), asyncHandler(automationController.update));
+automationRouter.delete("/:id", requirePermission("campaigns:delete"), asyncHandler(automationController.remove));
 
 automationRouter.post(
   "/:id/enroll",
-  requireRole(...CAN_WRITE_CAMPAIGNS),
+  requirePermission("campaigns:write"),
   asyncHandler(automationController.enroll),
 );
 automationRouter.post(
   "/enrollments/:enrollmentId/cancel",
-  requireRole(...CAN_WRITE_CAMPAIGNS),
+  requirePermission("campaigns:write"),
   asyncHandler(automationController.cancelEnrollment),
 );
 
@@ -32,6 +31,6 @@ automationRouter.post(
 // write here; a cron pinger authenticates with a real account's token the same as a person would.
 automationRouter.post(
   "/run-now",
-  requireRole(...CAN_WRITE_CAMPAIGNS),
+  requirePermission("campaigns:write"),
   asyncHandler(automationController.runNow),
 );
