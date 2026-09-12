@@ -478,7 +478,7 @@ export function Contacts() {
         title="Delete this contact?"
         description={
           deleteTarget
-            ? `${deleteTarget.firstName} ${deleteTarget.lastName} will be permanently removed, including consent and tag history. This can't be undone.`
+            ? `${deleteTarget.firstName} ${deleteTarget.lastName} will be permanently removed, including consent history, tags, and their record as a recipient on any past campaign (campaign-level counts will drop accordingly). This can't be undone.`
             : ""
         }
         confirmLabel="Delete"
