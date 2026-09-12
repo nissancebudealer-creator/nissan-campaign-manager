@@ -125,7 +125,7 @@ export interface Segment {
   name: string;
   description: string | null;
   rulesJson: SegmentRules;
-  createdById: string;
+  createdById: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -151,7 +151,7 @@ export interface Template {
   ctaLabel: string | null;
   ctaUrl: string | null;
   variables: string[];
-  createdById: string;
+  createdById: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -194,12 +194,13 @@ export interface Campaign {
   status: CampaignStatus;
   scheduledAt: string | null;
   sentAt: string | null;
+  isArchived: boolean;
   segmentId: string | null;
   segment: Segment | null;
   templateId: string | null;
   template: Template | null;
   tags: { tag: Tag }[];
-  createdById: string;
+  createdById: string | null;
   createdAt: string;
   updatedAt: string;
 }

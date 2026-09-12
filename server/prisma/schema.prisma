@@ -265,6 +265,10 @@ model Campaign {
   status                   CampaignStatus @default(DRAFT)
   scheduledAt              DateTime?
   sentAt                   DateTime?
+  // Orthogonal to status — a campaign in any status can be archived (hidden from the default
+  // list) and unarchived, with nothing about it changed or lost. Distinct from Cancelled, which is
+  // a real lifecycle state; archiving is purely a "get this out of my way" view filter.
+  isArchived               Boolean        @default(false)
 
   segmentId String?
   segment   Segment? @relation(fields: [segmentId], references: [id])

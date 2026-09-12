@@ -4,6 +4,7 @@ import type { AudiencePreview, Campaign, CampaignInput, CampaignStatus, Integrat
 export interface CampaignListParams {
   status?: CampaignStatus;
   channel?: string;
+  includeArchived?: boolean;
 }
 
 function toQueryString(params: object) {
@@ -35,6 +36,8 @@ export const campaignsApi = {
       `/campaigns/${id}/send`,
       { testMode },
     ),
+  archive: (id: string) => api.post<{ campaign: Campaign }>(`/campaigns/${id}/archive`),
+  unarchive: (id: string) => api.post<{ campaign: Campaign }>(`/campaigns/${id}/unarchive`),
 };
 
 export const integrationsApi = {

@@ -37,6 +37,16 @@ export async function remove(req: Request, res: Response) {
   res.status(204).send();
 }
 
+export async function archive(req: Request, res: Response) {
+  const campaign = await campaignService.archiveCampaign(req.params.id, req.user!.id, true);
+  res.json({ campaign });
+}
+
+export async function unarchive(req: Request, res: Response) {
+  const campaign = await campaignService.archiveCampaign(req.params.id, req.user!.id, false);
+  res.json({ campaign });
+}
+
 export async function duplicate(req: Request, res: Response) {
   const campaign = await campaignService.duplicateCampaign(req.params.id, req.user!.id);
   res.status(201).json({ campaign });

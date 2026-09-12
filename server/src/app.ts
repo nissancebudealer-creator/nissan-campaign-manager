@@ -18,6 +18,7 @@ import { automationRouter } from "./routes/automation.routes.js";
 import { adminRouter } from "./routes/admin.routes.js";
 import { uploadRouter } from "./routes/upload.routes.js";
 import { settingsRouter } from "./routes/settings.routes.js";
+import { backupRouter } from "./routes/backup.routes.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { UPLOADS_DIR, UPLOADS_URL_PATH } from "./config/uploads.js";
 
@@ -55,6 +56,7 @@ export function createApp() {
   app.use("/api/admin", adminRouter);
   app.use("/api/uploads", uploadRouter);
   app.use("/api/settings", settingsRouter);
+  app.use("/api/admin/backup", backupRouter);
 
   // Uploaded campaign/template images — public and unauthenticated by necessity (an email client
   // or the recipient's browser fetches this directly, with no way to send our auth header), and

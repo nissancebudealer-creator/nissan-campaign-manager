@@ -6,6 +6,7 @@ import { RolesTab } from "./RolesTab";
 import { AuditLogTab } from "./AuditLogTab";
 import { SendingLimitsTab } from "./SendingLimitsTab";
 import { BrandingTab } from "./BrandingTab";
+import { BackupTab } from "./BackupTab";
 
 const TABS = [
   { key: "users", label: "Users" },
@@ -13,6 +14,7 @@ const TABS = [
   { key: "audit", label: "Audit Log" },
   { key: "limits", label: "Sending Limits" },
   { key: "branding", label: "Branding" },
+  { key: "backup", label: "Backup" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -76,6 +78,7 @@ export function Administration() {
         {tab === "audit" && <AuditLogTab />}
         {tab === "limits" && <SendingLimitsTab />}
         {tab === "branding" && <BrandingTab />}
+        {tab === "backup" && <BackupTab />}
       </div>
     </div>
   );

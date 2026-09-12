@@ -45,6 +45,7 @@ export const campaignUpdateSchema = campaignInputSchema.innerType().partial();
 export const campaignListQuerySchema = z.object({
   status: z.enum(["DRAFT", "SCHEDULED", "SENDING", "SENT", "PAUSED", "CANCELLED", "FAILED"]).optional(),
   channel: channelSchema.optional(),
+  includeArchived: z.coerce.boolean().optional(),
 });
 
 export const scheduleSchema = z.object({

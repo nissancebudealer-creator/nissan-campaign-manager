@@ -45,3 +45,13 @@ campaignRouter.post(
   requireRole(...CAN_WRITE_CAMPAIGNS),
   asyncHandler(campaignController.send),
 );
+campaignRouter.post(
+  "/:id/archive",
+  requireRole(...CAN_WRITE_CAMPAIGNS),
+  asyncHandler(campaignController.archive),
+);
+campaignRouter.post(
+  "/:id/unarchive",
+  requireRole(...CAN_WRITE_CAMPAIGNS),
+  asyncHandler(campaignController.unarchive),
+);

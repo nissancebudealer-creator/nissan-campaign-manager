@@ -51,12 +51,32 @@ const campaignInclude = {
   tags: { include: { tag: true } },
 };
 
-export function listCampaigns(filters: { status?: CampaignStatus; channel?: Channel }) {
+export function listCampaigns(filters: { status?: CampaignStatus; channel?: Channel; includeArchived?: boolean }) {
   return prisma.campaign.findMany({
-    where: { status: filters.status, channel: filters.channel },
+    // Archived campaigns are hidden from the default list — only surfaced when explicitly asked
+    // for, so "old, out of the way" doesn't silently reappear in everyday views.
+    where: { status: filters.status, channel: filters.channel, isArchived: filters.includeArchived ? undefined : false },
     include: campaignInclude,
     orderBy: { updatedAt: "desc" },
   });
+}
+
+export async function archiveCampaign(id: string, actorId: string, archived: boolean) {
+  const existing = await prisma.campaign.findUnique({ where: { id } });
+  if (!existing) throw new AppError(404, "Campaign not found");
+  const campaign = await prisma.campaign.update({
+    where: { id },
+    data: { isArchived: archived },
+    include: campaignInclude,
+  });
+  await recordAudit({
+    userId: actorId,
+    action: archived ? "CAMPAIGN_ARCHIVED" : "CAMPAIGN_UNARCHIVED",
+    entityType: "Campaign",
+    entityId: id,
+    metadata: { name: existing.name },
+  });
+  return campaign;
 }
 
 export async function getCampaign(id: string) {

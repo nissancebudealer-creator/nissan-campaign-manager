@@ -16,12 +16,18 @@ export function Campaigns() {
   const [channel, setChannel] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Campaign | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
   const isAdministrator = useAuthStore((s) => s.user?.role) === "ADMINISTRATOR";
   const navigate = useNavigate();
 
   async function load() {
     setLoading(true);
-    const result = await campaignsApi.list({ status: status || undefined, channel: channel || undefined });
+    const result = await campaignsApi.list({
+      status: status || undefined,
+      channel: channel || undefined,
+      includeArchived: showArchived || undefined,
+    });
     setCampaigns(result.campaigns);
     setLoading(false);
   }
@@ -29,7 +35,7 @@ export function Campaigns() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, channel]);
+  }, [status, channel, showArchived]);
 
   async function handleDelete() {
     if (!deleteTarget) return;
@@ -41,6 +47,17 @@ export function Campaigns() {
     } catch (err) {
       setDeleteError(err instanceof ApiError ? err.message : "Could not delete this campaign.");
       setDeleteTarget(null);
+    }
+  }
+
+  async function handleToggleArchive(campaign: Campaign) {
+    setArchiveError(null);
+    try {
+      if (campaign.isArchived) await campaignsApi.unarchive(campaign.id);
+      else await campaignsApi.archive(campaign.id);
+      load();
+    } catch (err) {
+      setArchiveError(err instanceof ApiError ? err.message : "Could not update this campaign.");
     }
   }
 
@@ -82,7 +99,20 @@ export function Campaigns() {
             </option>
           ))}
         </select>
+        <label className="flex items-center gap-1.5 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={showArchived}
+            onChange={(e) => setShowArchived(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300"
+          />
+          Show archived
+        </label>
       </div>
+
+      {archiveError && (
+        <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{archiveError}</p>
+      )}
 
       <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
         <table className="w-full text-left text-sm">
@@ -115,7 +145,14 @@ export function Campaigns() {
             {!loading &&
               campaigns.map((c) => (
                 <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-2 font-medium text-slate-900">{c.name}</td>
+                  <td className="px-4 py-2 font-medium text-slate-900">
+                    {c.name}
+                    {c.isArchived && (
+                      <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
+                        Archived
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-2 text-slate-600">{c.type}</td>
                   <td className="px-4 py-2">
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
@@ -139,6 +176,12 @@ export function Campaigns() {
                       {c.status === "DRAFT" || c.status === "SCHEDULED" || c.status === "PAUSED"
                         ? "Edit"
                         : "View"}
+                    </button>
+                    <button
+                      onClick={() => handleToggleArchive(c)}
+                      className="mr-3 text-xs font-medium text-slate-600 hover:text-slate-900"
+                    >
+                      {c.isArchived ? "Unarchive" : "Archive"}
                     </button>
                     {(c.status === "DRAFT" || isAdministrator) && (
                       <button
