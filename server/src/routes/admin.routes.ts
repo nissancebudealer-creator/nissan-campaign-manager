@@ -14,6 +14,7 @@ adminRouter.use(requireAuth, requireRole(...CAN_MANAGE_ADMIN));
 adminRouter.get("/users", asyncHandler(adminController.listUsers));
 adminRouter.post("/users", asyncHandler(adminController.createUser));
 adminRouter.put("/users/:id", asyncHandler(adminController.updateUser));
+adminRouter.delete("/users/:id", asyncHandler(adminController.removeUser));
 adminRouter.post("/users/:id/reset-password", asyncHandler(adminController.resetPassword));
 
 adminRouter.get("/roles", asyncHandler(adminController.listRoles));

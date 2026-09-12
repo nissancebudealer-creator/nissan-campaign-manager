@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { adminApi } from "../../lib/adminApi";
 import { ApiError } from "../../lib/api";
+import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
+import { useAuthStore } from "../../store/authStore";
 import type { AdminRole, AdminUser } from "../../types";
 
 export function UsersTab() {
@@ -13,6 +15,9 @@ export function UsersTab() {
   const [formKey, setFormKey] = useState(0);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
   const [resetTarget, setResetTarget] = useState<AdminUser | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const currentUserId = useAuthStore((s) => s.user?.id);
 
   async function load() {
     setLoading(true);
@@ -36,6 +41,19 @@ export function UsersTab() {
     }
   }
 
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleteError(null);
+    try {
+      await adminApi.deleteUser(deleteTarget.id);
+      setDeleteTarget(null);
+      load();
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : "Could not delete this user.");
+      setDeleteTarget(null);
+    }
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between">
@@ -53,6 +71,7 @@ export function UsersTab() {
       </div>
 
       {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {deleteError && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{deleteError}</p>}
 
       <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
         <table className="w-full text-left text-sm">
@@ -110,10 +129,18 @@ export function UsersTab() {
                     </button>
                     <button
                       onClick={() => setResetTarget(user)}
-                      className="text-xs font-medium text-slate-600 hover:text-slate-900"
+                      className="mr-3 text-xs font-medium text-slate-600 hover:text-slate-900"
                     >
                       Reset password
                     </button>
+                    {user.id !== currentUserId && (
+                      <button
+                        onClick={() => setDeleteTarget(user)}
+                        className="text-xs font-medium text-red-600 hover:text-red-800"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -133,6 +160,20 @@ export function UsersTab() {
         }}
       />
       <ResetPasswordModal target={resetTarget} onClose={() => setResetTarget(null)} />
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Delete this user?"
+        description={
+          deleteTarget
+            ? `"${deleteTarget.firstName} ${deleteTarget.lastName}" (${deleteTarget.email}) will be permanently removed. Anything they created — contacts, campaigns, templates — stays, just no longer attributed to them. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        danger
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

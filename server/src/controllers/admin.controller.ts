@@ -26,6 +26,11 @@ export async function updateUser(req: Request, res: Response) {
   res.json({ user });
 }
 
+export async function removeUser(req: Request, res: Response) {
+  await adminService.deleteUser(req.params.id, req.user!.id);
+  res.status(204).send();
+}
+
 export async function resetPassword(req: Request, res: Response) {
   const { password } = resetPasswordSchema.parse(req.body);
   await adminService.resetUserPassword(req.params.id, password, req.user!.id);

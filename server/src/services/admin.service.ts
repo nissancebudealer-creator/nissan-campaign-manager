@@ -134,6 +134,30 @@ export async function updateUser(id: string, input: UpdateUserInput, actorId: st
   return user;
 }
 
+// Permanent removal — distinct from updateUser's isActive:false deactivation, and more
+// destructive: anything this user created (contacts, campaigns, templates, segments, automation
+// rules) is NOT deleted along with them — createdById is set to null on those rows, the same
+// treatment AuditLog.userId already gets, so real business data never disappears just because the
+// account that made it is gone.
+export async function deleteUser(id: string, actorId: string) {
+  if (id === actorId) {
+    throw new AppError(409, "You can't delete your own account while signed in as it.");
+  }
+  const existing = await prisma.user.findUnique({ where: { id }, include: { role: true } });
+  if (!existing) throw new AppError(404, "User not found");
+
+  await assertWouldNotOrphanAdmin(id, undefined, false);
+
+  await prisma.user.delete({ where: { id } });
+  await recordAudit({
+    userId: actorId,
+    action: "USER_DELETED",
+    entityType: "User",
+    entityId: id,
+    metadata: { email: existing.email, name: `${existing.firstName} ${existing.lastName}`, role: existing.role.name },
+  });
+}
+
 export async function resetUserPassword(id: string, password: string, actorId: string) {
   const existing = await prisma.user.findUnique({ where: { id } });
   if (!existing) throw new AppError(404, "User not found");

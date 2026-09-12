@@ -289,7 +289,7 @@ export interface AutomationRule {
   triggerValue: string | null;
   stepsJson: AutomationStep[];
   isActive: boolean;
-  createdBy: { firstName: string; lastName: string };
+  createdBy: { firstName: string; lastName: string } | null;
   createdAt: string;
   updatedAt: string;
 }

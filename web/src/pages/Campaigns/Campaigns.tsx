@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { campaignsApi } from "../../lib/campaignsApi";
 import { CAMPAIGN_STATUSES, CAMPAIGN_STATUS_STYLES, CHANNELS } from "../../lib/constants";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
+import { useAuthStore } from "../../store/authStore";
+import { ApiError } from "../../lib/api";
 import type { Campaign, CampaignStatus } from "../../types";
 
 const CHANNEL_LABELS: Record<string, string> = { EMAIL: "Email", WHATSAPP: "WhatsApp", VIBER: "Viber" };
@@ -13,6 +15,8 @@ export function Campaigns() {
   const [status, setStatus] = useState<CampaignStatus | "">("");
   const [channel, setChannel] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Campaign | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const isAdministrator = useAuthStore((s) => s.user?.role) === "ADMINISTRATOR";
   const navigate = useNavigate();
 
   async function load() {
@@ -29,9 +33,15 @@ export function Campaigns() {
 
   async function handleDelete() {
     if (!deleteTarget) return;
-    await campaignsApi.remove(deleteTarget.id);
-    setDeleteTarget(null);
-    load();
+    setDeleteError(null);
+    try {
+      await campaignsApi.remove(deleteTarget.id);
+      setDeleteTarget(null);
+      load();
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : "Could not delete this campaign.");
+      setDeleteTarget(null);
+    }
   }
 
   return (
@@ -130,7 +140,7 @@ export function Campaigns() {
                         ? "Edit"
                         : "View"}
                     </button>
-                    {c.status === "DRAFT" && (
+                    {(c.status === "DRAFT" || isAdministrator) && (
                       <button
                         onClick={() => setDeleteTarget(c)}
                         className="text-xs font-medium text-red-600 hover:text-red-800"
@@ -145,10 +155,20 @@ export function Campaigns() {
         </table>
       </div>
 
+      {deleteError && (
+        <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{deleteError}</p>
+      )}
+
       <ConfirmDialog
         open={Boolean(deleteTarget)}
         title="Delete this campaign?"
-        description={deleteTarget ? `"${deleteTarget.name}" will be permanently removed.` : ""}
+        description={
+          deleteTarget
+            ? deleteTarget.status === "DRAFT"
+              ? `"${deleteTarget.name}" will be permanently removed.`
+              : `"${deleteTarget.name}" has real send history — recipients, opens, and clicks. Deleting it erases that history permanently, not just the campaign. This cannot be undone.`
+            : ""
+        }
         confirmLabel="Delete"
         danger
         onConfirm={handleDelete}

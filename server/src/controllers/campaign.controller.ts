@@ -33,7 +33,7 @@ export async function update(req: Request, res: Response) {
 }
 
 export async function remove(req: Request, res: Response) {
-  await campaignService.deleteCampaign(req.params.id, req.user!.id);
+  await campaignService.deleteCampaign(req.params.id, req.user!.id, req.user!.role);
   res.status(204).send();
 }
 

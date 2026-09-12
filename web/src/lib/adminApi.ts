@@ -23,6 +23,7 @@ export const adminApi = {
   updateUser: (id: string, input: Partial<Pick<AdminUserInput, "firstName" | "lastName" | "roleId">> & { isActive?: boolean }) =>
     api.put<{ user: AdminUser }>(`/admin/users/${id}`, input),
   resetPassword: (id: string, password: string) => api.post<void>(`/admin/users/${id}/reset-password`, { password }),
+  deleteUser: (id: string) => api.delete<void>(`/admin/users/${id}`),
 
   listRoles: () => api.get<{ roles: AdminRole[] }>("/admin/roles"),
 

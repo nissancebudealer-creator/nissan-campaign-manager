@@ -140,19 +140,30 @@ export async function updateCampaign(id: string, input: Partial<CampaignInput>, 
   return campaign;
 }
 
-export async function deleteCampaign(id: string, actorId: string) {
+// A non-draft campaign carries real send/open/click history — deleting one is a genuinely
+// destructive action, not just tidying up a draft. Marketing Manager keeps the existing
+// draft-only deletion; only an Administrator can delete a campaign in any status, and every such
+// deletion is audited with enough metadata (status, recipient count) to leave a trace even though
+// the underlying rows are gone (cascade-deletes CampaignRecipient/CampaignMessage/CampaignTag).
+export async function deleteCampaign(id: string, actorId: string, actorRole: string) {
   const existing = await prisma.campaign.findUnique({ where: { id } });
   if (!existing) throw new AppError(404, "Campaign not found");
-  if (existing.status !== "DRAFT") {
-    throw new AppError(409, "Only draft campaigns can be deleted — cancel it first if it's scheduled");
+  if (existing.status !== "DRAFT" && actorRole !== "ADMINISTRATOR") {
+    throw new AppError(
+      409,
+      "Only a draft campaign can be deleted — cancel it first if it's scheduled, or ask an " +
+        "Administrator to delete it.",
+    );
   }
+  const recipientCount =
+    existing.status === "DRAFT" ? 0 : await prisma.campaignRecipient.count({ where: { campaignId: id } });
   await prisma.campaign.delete({ where: { id } });
   await recordAudit({
     userId: actorId,
     action: "CAMPAIGN_DELETED",
     entityType: "Campaign",
     entityId: id,
-    metadata: { name: existing.name },
+    metadata: { name: existing.name, status: existing.status, recipientCount },
   });
 }
 

@@ -109,8 +109,8 @@ model Contact {
   lastContactedAt   DateTime?
   notes             String?
 
-  createdById String
-  createdBy   User   @relation("ContactCreatedBy", fields: [createdById], references: [id])
+  createdById String?
+  createdBy   User?  @relation("ContactCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   tags                  ContactTag[]
   consents              Consent[]
@@ -186,8 +186,8 @@ model Segment {
   description String?
   rulesJson   Json // serialized rule tree, e.g. { and: [{ field, op, value }, { or: [...] }] }
 
-  createdById String
-  createdBy   User   @relation("SegmentCreatedBy", fields: [createdById], references: [id])
+  createdById String?
+  createdBy   User?  @relation("SegmentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   campaigns Campaign[]
 
@@ -225,8 +225,8 @@ model Template {
   ctaUrl        String?
   variables     String[] // e.g. ["first_name", "last_name", "company", "product_interest"]
 
-  createdById String
-  createdBy   User   @relation("TemplateCreatedBy", fields: [createdById], references: [id])
+  createdById String?
+  createdBy   User?  @relation("TemplateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   campaigns Campaign[]
 
@@ -275,8 +275,8 @@ model Campaign {
   senderIntegrationId String?
   senderIntegration   Integration? @relation(fields: [senderIntegrationId], references: [id])
 
-  createdById String
-  createdBy   User   @relation("CampaignCreatedBy", fields: [createdById], references: [id])
+  createdById String?
+  createdBy   User?  @relation("CampaignCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   tags       CampaignTag[]
   recipients CampaignRecipient[]
@@ -406,8 +406,8 @@ model AutomationRule {
   stepsJson    Json // [{ dayOffset, channel, templateId, whatsappTemplateName?, whatsappTemplateLanguage? }, ...]
   isActive     Boolean               @default(false)
 
-  createdById String
-  createdBy   User   @relation("AutomationCreatedBy", fields: [createdById], references: [id])
+  createdById String?
+  createdBy   User?  @relation("AutomationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   enrollments AutomationEnrollment[]
 

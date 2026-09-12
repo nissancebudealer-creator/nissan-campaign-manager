@@ -93,6 +93,11 @@ afterAll(async () => {
   await prisma.consent.deleteMany({ where: { contact: { email: { contains: TEST_EMAIL_DOMAIN } } } });
   await prisma.suppressionList.deleteMany({ where: { contact: { email: { contains: TEST_EMAIL_DOMAIN } } } });
   await prisma.contact.deleteMany({ where: { email: { contains: TEST_EMAIL_DOMAIN } } });
+  const mgr = await prisma.user.findUnique({ where: { email: "phase5-test-mgr@phase5test.example" } });
+  if (mgr) {
+    await prisma.auditLog.deleteMany({ where: { userId: mgr.id } });
+    await prisma.user.delete({ where: { id: mgr.id } }).catch(() => {});
+  }
   await prisma.auditLog.deleteMany({ where: { userId: testUserId } });
   await prisma.user.delete({ where: { id: testUserId } }).catch(() => {});
   await prisma.$disconnect();
@@ -184,8 +189,21 @@ describe("campaign CRUD and lifecycle", () => {
     ).rejects.toThrow("must be in the future");
   });
 
-  it("rejects deleting a non-draft campaign but allows deleting a draft", async () => {
-    const { campaignService } = modules;
+  it("a Marketing Manager can't delete a non-draft campaign, but an Administrator can", async () => {
+    const { campaignService, prisma } = modules;
+    const mgrRole = await prisma.role.findUniqueOrThrow({ where: { name: "MARKETING_MANAGER" } });
+    const mgr = await prisma.user.upsert({
+      where: { email: "phase5-test-mgr@phase5test.example" },
+      update: {},
+      create: {
+        email: "phase5-test-mgr@phase5test.example",
+        passwordHash: "not-a-real-hash",
+        firstName: "Phase5",
+        lastName: "TestManager",
+        roleId: mgrRole.id,
+      },
+    });
+
     const campaign = await campaignService.createCampaign(
       { name: "Phase5Test Deletable", type: "Service Promotion", channel: "EMAIL", segmentId, subject: "S", message: "M" },
       testUserId,
@@ -193,17 +211,24 @@ describe("campaign CRUD and lifecycle", () => {
     const future = new Date(Date.now() + 60 * 60 * 1000);
     await campaignService.scheduleCampaign(campaign.id, future, testUserId);
 
-    await expect(campaignService.deleteCampaign(campaign.id, testUserId)).rejects.toThrow(
-      "Only draft campaigns can be deleted",
-    );
+    // Marketing Manager: still blocked once it's no longer a draft — real send history stays
+    // erasable only by an Administrator, not the broader write group.
+    await expect(
+      campaignService.deleteCampaign(campaign.id, mgr.id, "MARKETING_MANAGER"),
+    ).rejects.toThrow("Only a draft campaign can be deleted");
 
-    await campaignService.cancelCampaign(campaign.id, testUserId);
+    // Administrator: can delete it in any status.
+    await campaignService.deleteCampaign(campaign.id, testUserId, "ADMINISTRATOR");
+    await expect(campaignService.getCampaign(campaign.id)).rejects.toThrow("Campaign not found");
+  });
 
+  it("allows deleting a draft campaign", async () => {
+    const { campaignService } = modules;
     const draft = await campaignService.createCampaign(
       { name: "Phase5Test Draft Only", type: "Service Promotion", channel: "EMAIL", segmentId, subject: "S", message: "M" },
       testUserId,
     );
-    await campaignService.deleteCampaign(draft.id, testUserId);
+    await campaignService.deleteCampaign(draft.id, testUserId, "ADMINISTRATOR");
     await expect(campaignService.getCampaign(draft.id)).rejects.toThrow("Campaign not found");
   });
 
