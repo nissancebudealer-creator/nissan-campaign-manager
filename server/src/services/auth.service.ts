@@ -2,7 +2,7 @@ import { prisma } from "../lib/prisma.js";
 import { hashPassword, verifyPassword } from "../utils/password.js";
 import { signAuthToken } from "../utils/jwt.js";
 import { AppError } from "../utils/AppError.js";
-import { ROLES } from "../config/roles.js";
+import { ROLES, modulesForRole, type RoleName } from "../config/roles.js";
 
 interface RegisterInput {
   email: string;
@@ -31,6 +31,7 @@ function publicUser(user: {
     lastName: user.lastName,
     isActive: user.isActive,
     role: user.role.name,
+    modules: modulesForRole(user.role.name as RoleName),
   };
 }
 

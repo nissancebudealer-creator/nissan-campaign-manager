@@ -13,6 +13,7 @@ export interface AuthUser {
   lastName: string;
   isActive: boolean;
   role: RoleName;
+  modules: string[];
 }
 
 export interface AuthResponse {
@@ -341,6 +342,7 @@ export interface AdminRole {
   description: string | null;
   userCount: number;
   grants: string[];
+  modules: string[];
 }
 
 export interface AuditLogEntry {

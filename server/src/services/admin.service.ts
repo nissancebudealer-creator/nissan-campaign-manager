@@ -14,6 +14,7 @@ import {
   CAN_WRITE_CAMPAIGNS,
   CAN_DELETE_CAMPAIGNS,
   CAN_MANAGE_ADMIN,
+  modulesForRole,
   type RoleName,
 } from "../config/roles.js";
 import { readGmailConfig, encryptGmailConfig } from "./gmailAuth.service.js";
@@ -199,6 +200,7 @@ export async function listRoles() {
     description: role.description,
     userCount: role._count.users,
     grants: ROUTE_GROUPS.filter((group) => group.roles.includes(role.name as RoleName)).map((g) => g.label),
+    modules: modulesForRole(role.name as RoleName),
   }));
 }
 
