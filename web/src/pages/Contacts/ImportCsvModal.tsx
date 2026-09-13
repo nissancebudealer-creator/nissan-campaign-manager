@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Papa from "papaparse";
 import clsx from "clsx";
 import { contactsApi } from "../../lib/contactsApi";
@@ -53,6 +53,8 @@ export function ImportCsvModal({ open, onClose, onImported }: ImportCsvModalProp
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [committedCount, setCommittedCount] = useState(0);
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!open) return null;
 
@@ -64,6 +66,8 @@ export function ImportCsvModal({ open, onClose, onImported }: ImportCsvModalProp
     setPreviewSummary(null);
     setError(null);
     setCommittedCount(0);
+    setSelectedFileName(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   function handleClose() {
@@ -83,6 +87,7 @@ export function ImportCsvModal({ open, onClose, onImported }: ImportCsvModalProp
 
   function handleFile(file: File) {
     setError(null);
+    setSelectedFileName(file.name);
     Papa.parse<Record<string, string>>(file, {
       header: true,
       skipEmptyLines: true,
@@ -171,11 +176,24 @@ export function ImportCsvModal({ open, onClose, onImported }: ImportCsvModalProp
                 </button>
               </div>
               <input
+                ref={fileInputRef}
                 type="file"
                 accept=".csv,text/csv"
-                className="mt-4 block w-full text-sm"
+                className="sr-only"
                 onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
               />
+              <div className="mt-4 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="shrink-0 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                >
+                  Choose file
+                </button>
+                <span className="truncate text-sm text-slate-500">
+                  {selectedFileName ?? "No file selected"}
+                </span>
+              </div>
             </div>
           )}
 
