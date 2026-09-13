@@ -3,7 +3,13 @@ import Papa from "papaparse";
 import clsx from "clsx";
 import { contactsApi } from "../../lib/contactsApi";
 import { ApiError } from "../../lib/api";
-import { CONTACT_CSV_HEADERS, applyMapping, guessColumnMapping, type ContactField } from "./csvMapping";
+import {
+  CONTACT_CSV_HEADERS,
+  applyMapping,
+  buildContactCsvTemplate,
+  guessColumnMapping,
+  type ContactField,
+} from "./csvMapping";
 import type { ImportRowResult } from "../../types";
 
 interface ImportCsvModalProps {
@@ -63,6 +69,16 @@ export function ImportCsvModal({ open, onClose, onImported }: ImportCsvModalProp
   function handleClose() {
     reset();
     onClose();
+  }
+
+  function handleDownloadTemplate() {
+    const blob = new Blob([buildContactCsvTemplate()], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "contacts-import-template.csv";
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   function handleFile(file: File) {
@@ -141,6 +157,19 @@ export function ImportCsvModal({ open, onClose, onImported }: ImportCsvModalProp
                 preview validation results before anything is saved — no invalid contacts get in
                 silently.
               </p>
+              <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-xs text-slate-500">
+                  Not sure how to format your file? Start from our template — its columns are
+                  mapped automatically.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleDownloadTemplate}
+                  className="shrink-0 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                >
+                  Download template
+                </button>
+              </div>
               <input
                 type="file"
                 accept=".csv,text/csv"
