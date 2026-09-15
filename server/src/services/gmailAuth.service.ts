@@ -90,6 +90,23 @@ export async function exchangeCodeForTokens(code: string): Promise<GmailTokenSet
 }
 
 export async function saveGmailIntegration(tokens: GmailTokenSet, connectedById: string) {
+  const existing = await prisma.integration.findFirst({ where: { type: "GMAIL" } });
+
+  // getAuthUrl forces prompt:"consent" on every connect, not just the first ever, so a reconnect
+  // (e.g. to fix a scope issue) must not silently wipe settings the admin already configured —
+  // carry the sender name and daily limit override forward across the token refresh.
+  let previousSenderName: string | undefined;
+  let previousDailyLimit: number | undefined;
+  if (existing?.config) {
+    try {
+      const previous = readGmailConfig(existing.config as string);
+      previousSenderName = previous.senderName;
+      previousDailyLimit = previous.dailyLimit;
+    } catch {
+      // Corrupt/undecryptable old config (or a fresh key) — nothing to carry forward.
+    }
+  }
+
   const configPlaintext = JSON.stringify({
     email: tokens.email,
     refreshToken: tokens.refreshToken,
@@ -97,9 +114,9 @@ export async function saveGmailIntegration(tokens: GmailTokenSet, connectedById:
     expiryDate: tokens.expiryDate,
     sentToday: 0,
     sentTodayDate: new Date().toISOString().slice(0, 10),
+    senderName: previousSenderName,
+    dailyLimit: previousDailyLimit,
   });
-
-  const existing = await prisma.integration.findFirst({ where: { type: "GMAIL" } });
   const integration = existing
     ? await prisma.integration.update({
         where: { id: existing.id },
