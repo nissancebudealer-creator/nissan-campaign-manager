@@ -24,23 +24,31 @@ export function PreSendConfirmDialog({
 }: PreSendConfirmDialogProps) {
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [batchSize, setBatchSize] = useState("");
 
   if (!open || !campaign) return null;
+
+  const isResume = campaign.status === "SENDING";
 
   async function handleConfirm() {
     setSending(true);
     setResult(null);
     try {
-      const response = await campaignsApi.send(campaign!.id, testMode);
+      const parsedBatchSize = batchSize.trim() ? Number(batchSize) : undefined;
+      const response = await campaignsApi.send(campaign!.id, testMode, parsedBatchSize);
       if ("testSentTo" in response) {
         setResult({ ok: true, message: `Test email sent to ${response.testSentTo}.` });
       } else {
+        const remainingNote =
+          response.remainingCount > 0
+            ? ` ${response.remainingCount} recipient${response.remainingCount === 1 ? "" : "s"} still to go — click "Send next batch" to continue.`
+            : " Everyone eligible has now been sent to.";
         setResult({
           ok: true,
           message:
             response.failedCount > 0
-              ? `Sent ${response.sentCount}, ${response.failedCount} failed — check the campaign's sending log.`
-              : `Sent to all ${response.sentCount} recipient${response.sentCount === 1 ? "" : "s"}.`,
+              ? `Sent ${response.sentCount}, ${response.failedCount} failed — check the campaign's sending log.${remainingNote}`
+              : `Sent ${response.sentCount} message${response.sentCount === 1 ? "" : "s"}.${remainingNote}`,
         });
         onSent?.();
       }
@@ -56,6 +64,7 @@ export function PreSendConfirmDialog({
 
   function handleClose() {
     setResult(null);
+    setBatchSize("");
     onClose();
   }
 
@@ -63,35 +72,62 @@ export function PreSendConfirmDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
       <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-lg">
         <h2 className="text-base font-semibold text-slate-900">
-          {testMode ? "Send a test message?" : "Send this campaign?"}
+          {testMode ? "Send a test message?" : isResume ? "Send the next batch?" : "Send this campaign?"}
         </h2>
 
         <dl className="mt-4 space-y-2 text-sm">
           <Row label="Campaign name" value={campaign.name} />
           <Row label="Channel" value={CHANNEL_LABELS[campaign.channel]} />
-          <Row label="Number of recipients" value={String(audience?.totalMatching ?? "—")} />
-          <Row
-            label="Opted-out exclusions"
-            value={`−${audience?.optedOutCount ?? 0}`}
-          />
-          <Row
-            label="No recorded opt-in"
-            value={`−${audience?.noConsentCount ?? 0}`}
-          />
-          <Row
-            label="Missing a deliverable address"
-            value={`−${audience?.noAddressCount ?? 0}`}
-          />
-          <Row
-            label="Estimated messages"
-            value={String(audience?.estimatedMessages ?? "—")}
-            emphasize
-          />
-          <Row
-            label="Scheduled time"
-            value={campaign.scheduledAt ? new Date(campaign.scheduledAt).toLocaleString() : "Immediately"}
-          />
+          {isResume ? (
+            <>
+              <Row label="Sent so far" value={String(campaign.sentCount ?? 0)} />
+              <Row
+                label="Remaining recipients"
+                value={String(campaign.remainingCount ?? "—")}
+                emphasize
+              />
+            </>
+          ) : (
+            <>
+              <Row label="Number of recipients" value={String(audience?.totalMatching ?? "—")} />
+              <Row label="Opted-out exclusions" value={`−${audience?.optedOutCount ?? 0}`} />
+              <Row label="No recorded opt-in" value={`−${audience?.noConsentCount ?? 0}`} />
+              <Row
+                label="Missing a deliverable address"
+                value={`−${audience?.noAddressCount ?? 0}`}
+              />
+              <Row
+                label="Estimated messages"
+                value={String(audience?.estimatedMessages ?? "—")}
+                emphasize
+              />
+              <Row
+                label="Scheduled time"
+                value={campaign.scheduledAt ? new Date(campaign.scheduledAt).toLocaleString() : "Immediately"}
+              />
+            </>
+          )}
         </dl>
+
+        {!testMode && (
+          <label className="mt-4 block">
+            <span className="text-xs font-medium text-slate-500">
+              Batch size (optional — leave blank to send to everyone eligible right now)
+            </span>
+            <input
+              type="number"
+              min={1}
+              placeholder="e.g. 100"
+              value={batchSize}
+              onChange={(e) => setBatchSize(e.target.value)}
+              className="input mt-1"
+            />
+            <span className="mt-1 block text-xs text-slate-400">
+              Sends only this many, then stops — click "Send next batch" afterward to continue.
+              Applies on top of the provider's real daily sending limit, whichever is smaller.
+            </span>
+          </label>
+        )}
 
         {result && (
           <div
@@ -113,10 +149,17 @@ export function PreSendConfirmDialog({
           {!result?.ok && (
             <button
               onClick={handleConfirm}
-              disabled={sending || (audience?.estimatedMessages ?? 0) === 0}
+              disabled={
+                sending ||
+                (testMode
+                  ? false
+                  : isResume
+                    ? (campaign.remainingCount ?? 0) === 0
+                    : (audience?.estimatedMessages ?? 0) === 0)
+              }
               className="rounded-md bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
             >
-              {sending ? "Sending…" : "Confirm and send"}
+              {sending ? "Sending…" : isResume ? "Send next batch" : "Confirm and send"}
             </button>
           )}
         </div>

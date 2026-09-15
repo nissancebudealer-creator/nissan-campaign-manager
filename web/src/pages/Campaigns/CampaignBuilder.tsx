@@ -67,6 +67,9 @@ export function CampaignBuilder() {
 
   const status = campaign?.status ?? "DRAFT";
   const editable = EDITABLE_STATUSES.includes(status);
+  // A campaign that hit a batch/daily-limit stop sits in SENDING between calls — sendable again
+  // (to continue) without being content-editable again.
+  const canSend = editable || status === "SENDING";
   const integrationConnected = integrations.some(
     (i) => i.type === CHANNEL_TO_INTEGRATION_TYPE[channel] && i.status === "CONNECTED",
   );
@@ -242,6 +245,14 @@ export function CampaignBuilder() {
   }
 
   async function openSendConfirm(testMode: boolean) {
+    // A SENDING campaign's content is already locked in from its first batch — this call is a
+    // resume/"send next batch", not a fresh compose, so skip re-saving (which the backend refuses
+    // for a non-editable status anyway).
+    if (campaign && status === "SENDING") {
+      setConfirmTestMode(testMode);
+      setConfirmOpen(true);
+      return;
+    }
     const wasUnsaved = !id;
     const target = await saveDraft();
     if (!target) return;
@@ -541,20 +552,29 @@ export function CampaignBuilder() {
                 blocked until one is connected under Integrations. This never simulates a send.
               </p>
             )}
+            {(status === "SENDING" || status === "PAUSED") &&
+              typeof campaign?.remainingCount === "number" && (
+                <p className="mt-1 text-xs text-slate-600">
+                  {campaign.sentCount ?? 0} sent so far
+                  {campaign.remainingCount > 0
+                    ? ` — ${campaign.remainingCount} recipient${campaign.remainingCount === 1 ? "" : "s"} still to go.`
+                    : "."}
+                </p>
+              )}
             <div className="mt-2 flex flex-wrap gap-2">
               <button
                 onClick={() => openSendConfirm(true)}
-                disabled={!editable}
+                disabled={!canSend}
                 className="rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
               >
                 Test send
               </button>
               <button
                 onClick={() => openSendConfirm(false)}
-                disabled={!editable}
+                disabled={!canSend}
                 className="rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
               >
-                Send now
+                {status === "SENDING" ? "Send next batch" : "Send now"}
               </button>
               {editable && (status === "DRAFT" || status === "PAUSED" || status === "SCHEDULED") && (
                 <button
@@ -564,7 +584,7 @@ export function CampaignBuilder() {
                   {status === "SCHEDULED" ? "Reschedule" : "Schedule"}
                 </button>
               )}
-              {status === "SCHEDULED" && (
+              {(status === "SCHEDULED" || status === "SENDING") && (
                 <button
                   onClick={handlePause}
                   className="rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"

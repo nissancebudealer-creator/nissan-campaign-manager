@@ -79,10 +79,41 @@ export async function archiveCampaign(id: string, actorId: string, archived: boo
   return campaign;
 }
 
+// Everyone this campaign's segment/channel would still reach that it hasn't already sent to —
+// shared by requestSend (what to actually attempt) and getCampaign (what to show as "remaining"
+// in the UI, so an admin closing and reopening the page still sees accurate batch progress).
+// A FAILED recipient is a real, completed attempt (the provider genuinely rejected it) — not
+// silently retried by a later "send"/"send next batch" call, only PENDING (never got a real
+// provider response, e.g. cut short by a daily-limit break) or never-attempted contacts are.
+async function buildUnsentRecipientsWhere(campaign: {
+  id: string;
+  segmentId: string | null;
+  channel: Channel;
+}): Promise<Prisma.ContactWhereInput> {
+  const segment = await prisma.segment.findUniqueOrThrow({ where: { id: campaign.segmentId! } });
+  return {
+    AND: [
+      buildRulesWhere(rulesSchema.parse(segment.rulesJson)),
+      deliverableWhere(campaign.channel),
+      channelAddressWhere(campaign.channel),
+      { campaignRecipients: { none: { campaignId: campaign.id, status: { in: ["SENT", "FAILED"] } } } },
+    ],
+  };
+}
+
 export async function getCampaign(id: string) {
   const campaign = await prisma.campaign.findUnique({ where: { id }, include: campaignInclude });
   if (!campaign) throw new AppError(404, "Campaign not found");
-  return campaign;
+
+  const sentCount = await prisma.campaignRecipient.count({ where: { campaignId: id, status: "SENT" } });
+  // Only meaningful once a real send has started — cheap to skip for DRAFT/SCHEDULED/etc, and
+  // trivially 0 once terminal (SENT/CANCELLED/FAILED never leave anything queued).
+  const remainingCount =
+    campaign.segmentId && (campaign.status === "SENDING" || campaign.status === "PAUSED")
+      ? await prisma.contact.count({ where: await buildUnsentRecipientsWhere(campaign) })
+      : 0;
+
+  return { ...campaign, sentCount, remainingCount };
 }
 
 export async function createCampaign(input: CampaignInput, actorId: string) {
@@ -360,14 +391,20 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const SENDABLE_STATUSES: CampaignStatus[] = ["DRAFT", "SCHEDULED", "SENDING", "PAUSED"];
+
 export async function requestSend(
   id: string,
   actorId: string,
-  options: { testMode: boolean },
+  options: { testMode: boolean; batchSize?: number },
 ) {
   const existing = await prisma.campaign.findUnique({ where: { id } });
   if (!existing) throw new AppError(404, "Campaign not found");
-  if (existing.status !== "DRAFT" && existing.status !== "SCHEDULED") {
+  // SENDING/PAUSED are both resendable here — a campaign whose audience exceeded one batch (or
+  // the provider's daily limit) stays in SENDING between calls rather than a one-shot terminal
+  // status, and calling send again on it (or on one explicitly PAUSED) is exactly "send the next
+  // batch" / "resume".
+  if (!SENDABLE_STATUSES.includes(existing.status)) {
     throw new AppError(409, `Cannot send a campaign that is ${existing.status.toLowerCase()}`);
   }
 
@@ -435,26 +472,20 @@ export async function requestSend(
     );
   }
 
-  const audience = await previewAudience(existing.segmentId!, existing.channel);
-  if (audience.estimatedMessages === 0) {
+  const where = await buildUnsentRecipientsWhere(existing);
+  const eligibleRecipients = await prisma.contact.findMany({ where });
+  if (eligibleRecipients.length === 0) {
     throw new AppError(
       400,
-      "No recipients to send to — every matching contact is either suppressed, missing a " +
-        "recorded opt-in for this channel, missing a deliverable address for this channel " +
-        "(e.g. not yet subscribed on Viber), or the segment is empty.",
+      "No recipients left to send to — every matching contact has either already been sent to, " +
+        "is suppressed, is missing a recorded opt-in for this channel, or is missing a " +
+        "deliverable address for this channel (e.g. not yet subscribed on Viber).",
     );
   }
+  const recipients =
+    options.batchSize && options.batchSize > 0 ? eligibleRecipients.slice(0, options.batchSize) : eligibleRecipients;
 
   await prisma.campaign.update({ where: { id }, data: { status: "SENDING" } });
-
-  const where: Prisma.ContactWhereInput = {
-    AND: [
-      buildRulesWhere(rulesSchema.parse((await prisma.segment.findUniqueOrThrow({ where: { id: existing.segmentId! } })).rulesJson)),
-      deliverableWhere(existing.channel),
-      channelAddressWhere(existing.channel),
-    ],
-  };
-  const recipients = await prisma.contact.findMany({ where });
 
   // Body variable names in the order they appear in the campaign message — mapped positionally to
   // an approved WhatsApp template's numbered {{1}}, {{2}}, ... placeholders. Computed once, since
@@ -535,6 +566,16 @@ export async function requestSend(
       sentCount += 1;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown send error";
+      const isDailyLimitError =
+        errorMessage.toLowerCase().includes("daily") && errorMessage.toLowerCase().includes("limit reached");
+
+      if (isDailyLimitError) {
+        // Not a real failure for this recipient — nothing was actually attempted against the
+        // provider. Leave them PENDING (already upserted above) so the next batch/day picks them
+        // up automatically instead of permanently recording a failure that was never theirs.
+        break;
+      }
+
       await prisma.$transaction([
         prisma.campaignRecipient.update({
           where: { id: campaignRecipient.id },
@@ -550,26 +591,32 @@ export async function requestSend(
         }),
       ]);
       failedCount += 1;
-      // A hard daily-limit rejection means every subsequent send would fail too — stop the loop
-      // rather than burn through the rest of the list generating identical failures.
-      if (errorMessage.toLowerCase().includes("daily") && errorMessage.toLowerCase().includes("limit reached")) break;
     }
 
     await sleep(SEND_DELAY_MS);
   }
 
-  const finalStatus: CampaignStatus = sentCount > 0 ? "SENT" : "FAILED";
+  // Recomputed with the exact same query used to pick recipients in the first place (and the one
+  // getCampaign uses independently for the UI) — a never-attempted-yet contact (batchSize cutoff)
+  // or one left PENDING by a daily-limit break both still count; a genuinely FAILED one doesn't.
+  const remainingCount = await prisma.contact.count({ where });
+  // Cumulative across every batch this campaign has ever run, not just this call — a later batch
+  // finishing off a large audience must still resolve to SENT if earlier batches already
+  // succeeded, even if this particular call's own sentCount is 0.
+  const totalSentSoFar = await prisma.campaignRecipient.count({ where: { campaignId: id, status: "SENT" } });
+  const finalStatus: CampaignStatus = remainingCount > 0 ? "SENDING" : totalSentSoFar > 0 ? "SENT" : "FAILED";
+
   await prisma.campaign.update({
     where: { id },
-    data: { status: finalStatus, sentAt: new Date() },
+    data: finalStatus === "SENT" ? { status: finalStatus, sentAt: new Date() } : { status: finalStatus },
   });
   await recordAudit({
     userId: actorId,
     action: "CAMPAIGN_SENT",
     entityType: "Campaign",
     entityId: id,
-    metadata: { sentCount, failedCount },
+    metadata: { sentCount, failedCount, remainingCount },
   });
 
-  return { sentCount, failedCount };
+  return { sentCount, failedCount, remainingCount };
 }

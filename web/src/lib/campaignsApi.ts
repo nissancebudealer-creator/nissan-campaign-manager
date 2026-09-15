@@ -31,10 +31,10 @@ export const campaignsApi = {
     api.post<{ campaign: Campaign }>(`/campaigns/${id}/schedule`, { scheduledAt }),
   pause: (id: string) => api.post<{ campaign: Campaign }>(`/campaigns/${id}/pause`),
   cancel: (id: string) => api.post<{ campaign: Campaign }>(`/campaigns/${id}/cancel`),
-  send: (id: string, testMode: boolean) =>
-    api.post<{ testSentTo: string } | { sentCount: number; failedCount: number }>(
+  send: (id: string, testMode: boolean, batchSize?: number) =>
+    api.post<{ testSentTo: string } | { sentCount: number; failedCount: number; remainingCount: number }>(
       `/campaigns/${id}/send`,
-      { testMode },
+      { testMode, batchSize },
     ),
   archive: (id: string) => api.post<{ campaign: Campaign }>(`/campaigns/${id}/archive`),
   unarchive: (id: string) => api.post<{ campaign: Campaign }>(`/campaigns/${id}/unarchive`),

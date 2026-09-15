@@ -204,6 +204,10 @@ export interface Campaign {
   createdById: string | null;
   createdAt: string;
   updatedAt: string;
+  // Present only on the single-campaign GET response — real counts computed from
+  // CampaignRecipient rows, not part of what's persisted on the Campaign row itself.
+  sentCount?: number;
+  remainingCount?: number;
 }
 
 export interface CampaignInput {

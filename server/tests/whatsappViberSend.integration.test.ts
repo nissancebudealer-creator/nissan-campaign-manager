@@ -250,6 +250,85 @@ describe("WhatsApp send gating", () => {
     expect(reloaded.status).toBe("FAILED");
   }, 30000); // a real outbound call to Meta's Graph API, competing with 12+ other test files
   // hammering Supabase concurrently — occasionally exceeds the 20s default under that load.
+
+  it("caps a send to batchSize, stays resumable (SENDING) with an accurate remaining count, and picks up the rest on the next call", async () => {
+    const { prisma, campaignService, contactService, consentService, tagService } = modules;
+
+    const integration = await prisma.integration.findFirstOrThrow({
+      where: { type: "WHATSAPP", name: `${TEST_MARKER} Fake WhatsApp` },
+    });
+    const { encryptWhatsAppConfig } = await import("../src/services/whatsapp.service.js");
+    await prisma.integration.update({
+      where: { id: integration.id },
+      data: { config: encryptWhatsAppConfig({ phoneNumberId: "000000000", accessToken: "invalid-token" }) },
+    });
+
+    const tag = await tagService.createTag(`${TEST_MARKER}BatchTag`);
+    const contacts = await Promise.all(
+      [1, 2, 3].map((n) =>
+        contactService.createContact(
+          {
+            firstName: `Batch${n}`,
+            lastName: "Contact",
+            email: `wa-batch${n}${TEST_EMAIL_DOMAIN}`,
+            whatsappNumber: `63917000000${n}`,
+            tagIds: [tag.id],
+          },
+          testUserId,
+        ),
+      ),
+    );
+    for (const c of contacts) {
+      await consentService.setConsent({ contactId: c.id, channel: "WHATSAPP", optIn: true, actorId: testUserId });
+    }
+    const segment = await modules.segmentService.createSegment(
+      {
+        name: `${TEST_MARKER} Batch Segment`,
+        rules: { groups: [{ conditions: [{ field: "tag", operator: "has", value: tag.name }] }] },
+      },
+      testUserId,
+    );
+    const campaign = await campaignService.createCampaign(
+      {
+        name: `${TEST_MARKER} Batch Campaign`,
+        type: "New Vehicle Promotion",
+        channel: "WHATSAPP",
+        segmentId: segment.id,
+        message: "Hi {{first_name}}",
+        whatsappTemplateName: "not_a_real_template",
+      },
+      testUserId,
+    );
+
+    // First batch: only 2 of the 3 eligible contacts should even be attempted.
+    const firstBatch = await campaignService.requestSend(campaign.id, testUserId, { testMode: false, batchSize: 2 });
+    expect(firstBatch).toMatchObject({ sentCount: 0, failedCount: 2, remainingCount: 1 });
+
+    const afterFirstBatch = await prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id } });
+    expect(afterFirstBatch.status).toBe("SENDING"); // resumable, not a terminal outcome
+
+    const recipientsAfterFirstBatch = await prisma.campaignRecipient.findMany({ where: { campaignId: campaign.id } });
+    expect(recipientsAfterFirstBatch).toHaveLength(2); // the untouched 3rd contact has no row yet
+
+    // getCampaign should report the same remaining count independently, without relying on the
+    // send response — this is what the UI reads after a page reload.
+    const reloadedCampaign = await campaignService.getCampaign(campaign.id);
+    expect(reloadedCampaign.remainingCount).toBe(1);
+    expect(reloadedCampaign.sentCount).toBe(0);
+
+    // Second call, no batchSize: resumes with only the 1 never-touched contact — a FAILED
+    // recipient is a real, completed attempt, not silently retried by a later call.
+    const secondBatch = await campaignService.requestSend(campaign.id, testUserId, { testMode: false });
+    expect(secondBatch).toMatchObject({ sentCount: 0, failedCount: 1, remainingCount: 0 });
+
+    const afterSecondBatch = await prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id } });
+    expect(afterSecondBatch.status).toBe("FAILED"); // now genuinely terminal — nothing ever sent
+
+    const recipientsAfterSecondBatch = await prisma.campaignRecipient.findMany({ where: { campaignId: campaign.id } });
+    expect(recipientsAfterSecondBatch).toHaveLength(3);
+    expect(recipientsAfterSecondBatch.every((r) => r.status === "FAILED")).toBe(true);
+  }, 45000); // two real outbound Meta API round-trips across 3 contacts each, competing with the
+  // rest of the suite hammering Supabase concurrently.
 });
 
 describe("Viber webhook subscriber attribution", () => {

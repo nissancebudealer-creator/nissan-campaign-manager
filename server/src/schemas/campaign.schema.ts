@@ -55,4 +55,9 @@ export const scheduleSchema = z.object({
 // Test sends always go to the requesting user's own account email — no separate recipient input.
 export const sendRequestSchema = z.object({
   testMode: z.boolean().default(false),
+  // Caps how many recipients this one call attempts — leaving it unset sends to everyone
+  // currently eligible (still bounded by the provider's real daily limit). Calling send again
+  // later (manually, or automatically resuming a paused one) picks up wherever the last call
+  // stopped.
+  batchSize: z.number().int().positive().max(10000).optional(),
 });
