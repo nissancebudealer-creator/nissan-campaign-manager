@@ -35,6 +35,14 @@ to reach your `localhost`; the image will never load and Reports will never see 
 even though nothing in the send itself failed. This is the #1 thing to check if images or
 open/click tracking mysteriously don't work once you start sending to actual customers.
 
+**Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` before uploading any campaign/template
+image.** Uploaded images are stored in Supabase Storage, not on the API server's own disk —
+Render's (and most free-tier hosts') filesystem is wiped on every redeploy, which would silently
+break the image in any campaign already sent or drafted. Create a public bucket in your Supabase
+project's Storage tab named to match `SUPABASE_STORAGE_BUCKET` (defaults to `campaign-images`),
+then copy `SUPABASE_URL` and the `service_role` key from Project Settings > API. Without these set,
+uploading an image returns a clear error rather than silently writing to disk.
+
 ## Build commands
 
 ```bash

@@ -25,6 +25,16 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().optional().default(""),
   GOOGLE_CLIENT_SECRET: z.string().optional().default(""),
   GOOGLE_REDIRECT_URI: z.string().optional().default(""),
+
+  // Campaign/template image uploads live in Supabase Storage, not local disk — Render's
+  // filesystem is wiped on every redeploy, which would silently break every image already
+  // referenced by a sent or drafted campaign. Optional at the schema level (same pattern as the
+  // Google credentials above) because the storage client is only constructed lazily, on the
+  // first actual upload — so the server can still boot and everything else can still be tested
+  // without these set, but uploading an image will fail clearly if they're missing.
+  SUPABASE_URL: z.string().optional().default(""),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional().default(""),
+  SUPABASE_STORAGE_BUCKET: z.string().optional().default("campaign-images"),
 });
 
 const parsed = envSchema.safeParse(process.env);

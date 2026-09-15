@@ -20,7 +20,6 @@ import { uploadRouter } from "./routes/upload.routes.js";
 import { settingsRouter } from "./routes/settings.routes.js";
 import { backupRouter } from "./routes/backup.routes.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
-import { UPLOADS_DIR, UPLOADS_URL_PATH } from "./config/uploads.js";
 
 export function createApp() {
   const app = express();
@@ -57,17 +56,6 @@ export function createApp() {
   app.use("/api/uploads", uploadRouter);
   app.use("/api/settings", settingsRouter);
   app.use("/api/admin/backup", backupRouter);
-
-  // Uploaded campaign/template images — public and unauthenticated by necessity (an email client
-  // or the recipient's browser fetches this directly, with no way to send our auth header), and
-  // marked cross-origin so the web app's own live preview (a different origin in dev) can load it
-  // despite helmet's default same-origin Cross-Origin-Resource-Policy.
-  app.use(
-    UPLOADS_URL_PATH,
-    express.static(UPLOADS_DIR, {
-      setHeaders: (res) => res.setHeader("Cross-Origin-Resource-Policy", "cross-origin"),
-    }),
-  );
 
   app.use(notFoundHandler);
   app.use(errorHandler);
