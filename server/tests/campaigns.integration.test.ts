@@ -119,15 +119,30 @@ describe("audience preview", () => {
   });
 
   it("excludes contacts with no recorded opt-in at all — not just explicit opt-outs", async () => {
-    const { contactService, campaignService } = modules;
-    const noConsentContact = await contactService.createContact(
-      { firstName: "NoConsent", lastName: "Contact", email: `noconsent${TEST_EMAIL_DOMAIN}`, leadStatus: "Hot" },
-      testUserId,
-    );
+    const { prisma, campaignService } = modules;
+    // Bypasses contactService.createContact on purpose: new contacts are opted in by default now
+    // (a deliberate business decision), so a truly consent-less contact can no longer arise from
+    // that path. Writing the row directly simulates one that reached the DB with no consent
+    // record at all (e.g. a legacy row, or a future write path that skips consent) — proving
+    // previewAudience still treats "no record" as non-deliverable, same as an explicit opt-out.
+    const noConsentContact = await prisma.contact.create({
+      data: { firstName: "NoConsent", lastName: "Contact", email: `noconsent${TEST_EMAIL_DOMAIN}`, leadStatus: "Hot" },
+    });
     const preview = await campaignService.previewAudience(segmentId, "EMAIL");
     expect(preview.noConsentCount).toBeGreaterThanOrEqual(1);
     const sampleIds = preview.sample.map((c) => c.id);
     expect(sampleIds).not.toContain(noConsentContact.id);
+  });
+
+  it("opts a newly created contact in on every channel by default", async () => {
+    const { contactService, consentService } = modules;
+    const contact = await contactService.createContact(
+      { firstName: "DefaultOptIn", lastName: "Contact", email: `defaultoptin${TEST_EMAIL_DOMAIN}` },
+      testUserId,
+    );
+    const history = await consentService.getConsentHistory(contact.id);
+    const optedInChannels = history.filter((c) => c.optIn).map((c) => c.channel);
+    expect(optedInChannels.sort()).toEqual(["EMAIL", "VIBER", "WHATSAPP"]);
   });
 });
 

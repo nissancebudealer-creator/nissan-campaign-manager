@@ -165,8 +165,13 @@ describe("consent + suppression", () => {
     });
     expect(suppressed).not.toBeNull();
 
+    // Every new contact is opted in on all channels by default now (see contact.service.ts), so
+    // full history also carries that initial EMAIL/WHATSAPP/VIBER grant — filter to just EMAIL's
+    // own append-only trail: the default grant, then this test's explicit opt-in, then opt-out.
     const history = await consentService.getConsentHistory(contact.id);
-    expect(history).toHaveLength(2);
+    const emailHistory = history.filter((h) => h.channel === "EMAIL");
+    expect(emailHistory).toHaveLength(3);
+    expect(emailHistory[0].optIn).toBe(false); // most recent first
   });
 });
 
@@ -200,5 +205,22 @@ describe("CSV import validation", () => {
     const validRows = validated.filter((r) => r.status === "valid").map((r) => r.data);
     const result = await contactService.commitImport(validRows, testUserId);
     expect(result.created).toBe(1);
+  });
+
+  it("opts an imported contact in on every channel by default", async () => {
+    const { prisma, contactService, consentService, validateImportRow } = modules;
+    const rows = [
+      { firstName: "ImportedConsent", lastName: "Row", email: `importedconsent${TEST_EMAIL_DOMAIN}` },
+    ];
+    const validated = await contactService.validateImportRows(rows, validateImportRow);
+    const validRows = validated.filter((r) => r.status === "valid").map((r) => r.data);
+    await contactService.commitImport(validRows, testUserId);
+
+    const contact = await prisma.contact.findFirstOrThrow({
+      where: { email: `importedconsent${TEST_EMAIL_DOMAIN}` },
+    });
+    const history = await consentService.getConsentHistory(contact.id);
+    const optedInChannels = history.filter((c) => c.optIn).map((c) => c.channel);
+    expect(optedInChannels.sort()).toEqual(["EMAIL", "VIBER", "WHATSAPP"]);
   });
 });

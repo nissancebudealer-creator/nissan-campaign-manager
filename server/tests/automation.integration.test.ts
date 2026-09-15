@@ -109,7 +109,10 @@ describe("automatic triggers", () => {
     expect(enrollment!.currentStepIndex).toBe(0);
     const expectedDue = new Date(before);
     expectedDue.setUTCDate(expectedDue.getUTCDate() + 2);
-    expect(Math.abs(enrollment!.nextStepDueAt!.getTime() - expectedDue.getTime())).toBeLessThan(10_000);
+    // createContact now does one more sequential round-trip (the default-consent batch insert)
+    // before the trigger evaluates "now" — under real Supabase pooler latency that's enough to
+    // occasionally push past a 10s margin, so this needs more headroom than before.
+    expect(Math.abs(enrollment!.nextStepDueAt!.getTime() - expectedDue.getTime())).toBeLessThan(20_000);
   });
 
   it("only fires LEAD_STATUS_CHANGED on an actual transition into the target status, and never double-enrolls", async () => {
@@ -220,10 +223,13 @@ describe("the runner — real consent/address re-check, never fabricates a send"
       },
       testUserId,
     );
-    const contact = await modules.contactService.createContact(
-      { firstName: "NoConsent", lastName: "Contact", email: `noconsent-runner${TEST_EMAIL_DOMAIN}` },
-      testUserId,
-    );
+    // Bypasses contactService.createContact on purpose: new contacts are opted in by default now
+    // (a deliberate business decision), so a truly consent-less contact can no longer arise from
+    // that path. Writing the row directly simulates one that reached the DB with no consent
+    // record at all — proving the runner still skips it, same as an explicit opt-out would.
+    const contact = await modules.prisma.contact.create({
+      data: { firstName: "NoConsent", lastName: "Contact", email: `noconsent-runner${TEST_EMAIL_DOMAIN}` },
+    });
     // No consent recorded at all for EMAIL — deliverableWhere excludes this contact.
     const enrollment = await modules.automationService.enrollContact(rule.id, contact.id, testUserId);
     // Backdate so it's immediately due, same as a real dayOffset:0 enrollment would be almost

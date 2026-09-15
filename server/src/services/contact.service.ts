@@ -1,9 +1,16 @@
-import { Prisma } from "@prisma/client";
+import crypto from "node:crypto";
+import { Prisma, type ConsentChannel } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
 import { recordAudit } from "./audit.service.js";
 import { evaluateNewContactTrigger, evaluateLeadStatusTrigger } from "./automation.service.js";
 import type { validateImportRow } from "../schemas/contact.schema.js";
+
+// Every new contact is opted in on all channels by default (business decision — the app no
+// longer requires an explicit consent-capture step before a contact becomes deliverable). Real
+// Consent rows are still written (not a bypass of the deliverability check itself) so the audit
+// trail, per-channel opt-out, and suppression list all keep working exactly as before.
+const DEFAULT_CONSENT_CHANNELS: ConsentChannel[] = ["EMAIL", "WHATSAPP", "VIBER"];
 
 interface ContactInput {
   firstName: string;
@@ -126,11 +133,23 @@ export async function createContact(input: ContactInput, createdById: string) {
     include: contactInclude,
   });
 
+  // A single batched insert rather than looping setConsent per channel — this is a brand new
+  // contact, so there's no prior suppression to clean up and no need to re-check it exists.
+  await prisma.consent.createMany({
+    data: DEFAULT_CONSENT_CHANNELS.map((channel) => ({
+      contactId: contact.id,
+      channel,
+      optIn: true,
+      consentSource: "Default opt-in on creation",
+    })),
+  });
+
   await recordAudit({
     userId: createdById,
     action: "CONTACT_CREATED",
     entityType: "Contact",
     entityId: contact.id,
+    metadata: { defaultOptInChannels: DEFAULT_CONSENT_CHANNELS },
   });
 
   await evaluateNewContactTrigger(contact);
@@ -329,6 +348,9 @@ export async function commitImport(rows: Record<string, string>[], createdById: 
     }
 
     toCreate.push({
+      // Generated up front (rather than left to Prisma's own cuid() default) so the id is known
+      // here for the batched Consent insert below, without a second round-trip to look rows back up.
+      id: crypto.randomUUID(),
       firstName: row.firstName.trim(),
       lastName: row.lastName.trim(),
       company: row.company?.trim() || null,
@@ -347,6 +369,19 @@ export async function commitImport(rows: Record<string, string>[], createdById: 
   }
 
   const created = toCreate.length === 0 ? 0 : (await prisma.contact.createMany({ data: toCreate })).count;
+
+  if (toCreate.length > 0) {
+    await prisma.consent.createMany({
+      data: toCreate.flatMap((c) =>
+        DEFAULT_CONSENT_CHANNELS.map((channel) => ({
+          contactId: c.id!,
+          channel,
+          optIn: true,
+          consentSource: "CSV import (default opt-in)",
+        })),
+      ),
+    });
+  }
 
   await recordAudit({
     userId: createdById,
