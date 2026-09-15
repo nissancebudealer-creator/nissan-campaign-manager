@@ -12,16 +12,29 @@ review actual usage before large sends.
    `consentSource` (e.g. "Web form", "In-store", "CSV import") — so you can show, for any contact
    and channel, exactly when and how consent was captured.
 
-2. **Deliverability requires an explicit recorded opt-in — suppression is just the other half.**
+2. **Deliverability still requires a recorded opt-in — suppression is just the other half.**
    Every campaign audience query (`server/src/services/campaign.service.ts`
    `deliverableWhere`) requires both `consents: { some: { channel, optIn: true } }` **and**
-   `suppressions: { none: { channel } }`. A contact who was imported without ever going through a
-   consent-capture step (no consent record at all — "no record" state) is excluded from sending
-   exactly the same as one who explicitly opted out. This was a real gap during Phase 6 build-out
-   — the first implementation only checked for absence of suppression, which would have let a
-   never-consented contact receive campaigns — caught during in-browser verification and fixed
-   before shipping, with a dedicated test (`campaigns.integration.test.ts`, "excludes contacts
-   with no recorded opt-in at all") to keep it from regressing.
+   `suppressions: { none: { channel } }`. This mechanism is unchanged and still gates every send
+   and automation step exactly as described below — it's a real dated row in the `consents` table
+   that has to exist, not a UI-only label.
+
+   **What changed (business decision, not a gap):** every new contact — created manually or via
+   CSV import — is now granted that opt-in record automatically at creation time
+   (`consentSource: "Default opt-in on creation"` / `"CSV import (default opt-in)"`), rather than
+   requiring a separate consent-capture step before becoming deliverable. A contact who somehow
+   still has no consent record at all (e.g. a row written by some future path that bypasses
+   `contactService.createContact`/`commitImport`) is still excluded from sending exactly like an
+   explicit opt-out — that protection is unchanged and still covered by a dedicated test
+   (`campaigns.integration.test.ts`, "excludes contacts with no recorded opt-in at all"). What
+   moved is the *default* at creation, from "no record" to "opted in".
+
+   **This shifts real responsibility onto whoever adds or imports a contact.** The platform no
+   longer independently verifies that consent was captured before a contact enters the system — it
+   assumes anyone added has a legitimate basis to be contacted, and will honor an explicit opt-out
+   at any point (principle 3) but can't retroactively detect one that was never recorded. Have your
+   organization's compliance/legal function confirm this default matches how contacts are actually
+   sourced before relying on it for real sends.
 
 3. **Every consent/opt-out change is auditable.** Consent history is append-only in the
    `consents` table (an opt-out creates a new record / sets `optOutDate` rather than deleting
@@ -88,7 +101,9 @@ Automation is not a separate, looser sending path — it reuses every rule above
 ## What the platform will never do
 
 - Send to a contact without a recorded opt-in for that specific channel — including a step in an
-  automation sequence, re-checked at send time, not just at enrollment.
+  automation sequence, re-checked at send time, not just at enrollment. (New contacts are granted
+  that opt-in record automatically at creation — see principle 2 — but an explicit opt-out always
+  removes it immediately, and the check itself is never skipped.)
 - Send to a contact on the suppression list for that channel, even if re-added to a segment.
 - Bypass a channel provider's rate limits, template-approval requirements, or business
   verification requirements.

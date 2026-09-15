@@ -403,9 +403,13 @@ export function Help() {
           </SectionHeading>
           <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm text-slate-600">
             <li>
-              <strong>Never send to someone with no recorded opt-in.</strong> The app enforces this
-              automatically — a contact you haven't captured consent for simply won't count as
-              reachable.
+              <strong>Every contact is opted in by default when added or imported.</strong> The app
+              no longer requires a separate consent-capture step first — adding or importing a
+              contact is treated as your assertion that you have a real basis to message them.
+              Deliverability is still gated on a real, dated consent record (never silently
+              bypassed), so an explicit opt-out always removes reachability immediately; only the
+              starting default changed. Only add or import contacts you actually have a legitimate
+              reason to contact.
             </li>
             <li>
               <strong>Every email carries a working unsubscribe link.</strong> Clicking it
