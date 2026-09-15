@@ -66,7 +66,7 @@ const importRowSchema = z.object({
 
 export const importRequestSchema = z.object({
   dryRun: z.boolean(),
-  rows: z.array(z.record(z.string(), z.string())).min(1).max(2000),
+  rows: z.array(z.record(z.string(), z.string())).min(1).max(10000),
 });
 
 export function validateImportRow(raw: Record<string, string>) {

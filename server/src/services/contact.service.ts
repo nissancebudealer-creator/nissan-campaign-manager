@@ -309,34 +309,44 @@ export async function validateImportRows(
 }
 
 export async function commitImport(rows: Record<string, string>[], createdById: string) {
-  let created = 0;
+  const existingEmails = new Set(
+    (
+      await prisma.contact.findMany({
+        where: { email: { not: null } },
+        select: { email: true },
+      })
+    ).map((c) => (c.email ?? "").toLowerCase()),
+  );
+
+  const seenEmails = new Set<string>();
+  const toCreate: Prisma.ContactCreateManyInput[] = [];
+
   for (const row of rows) {
     const email = row.email ? row.email.trim().toLowerCase() : null;
     if (email) {
-      const exists = await prisma.contact.findFirst({ where: { email: { equals: email, mode: "insensitive" } } });
-      if (exists) continue;
+      if (existingEmails.has(email) || seenEmails.has(email)) continue;
+      seenEmails.add(email);
     }
 
-    await prisma.contact.create({
-      data: {
-        firstName: row.firstName.trim(),
-        lastName: row.lastName.trim(),
-        company: row.company?.trim() || null,
-        email,
-        mobileNumber: row.mobileNumber?.trim() || null,
-        whatsappNumber: row.whatsappNumber?.trim() || null,
-        viberNumber: row.viberNumber?.trim() || null,
-        customerType: row.customerType?.trim() || null,
-        productInterest: row.productInterest?.trim() || null,
-        location: row.location?.trim() || null,
-        leadSource: row.leadSource?.trim() || "CSV Import",
-        leadStatus: row.leadStatus?.trim() || null,
-        notes: row.notes?.trim() || null,
-        createdById,
-      },
+    toCreate.push({
+      firstName: row.firstName.trim(),
+      lastName: row.lastName.trim(),
+      company: row.company?.trim() || null,
+      email,
+      mobileNumber: row.mobileNumber?.trim() || null,
+      whatsappNumber: row.whatsappNumber?.trim() || null,
+      viberNumber: row.viberNumber?.trim() || null,
+      customerType: row.customerType?.trim() || null,
+      productInterest: row.productInterest?.trim() || null,
+      location: row.location?.trim() || null,
+      leadSource: row.leadSource?.trim() || "CSV Import",
+      leadStatus: row.leadStatus?.trim() || null,
+      notes: row.notes?.trim() || null,
+      createdById,
     });
-    created += 1;
   }
+
+  const created = toCreate.length === 0 ? 0 : (await prisma.contact.createMany({ data: toCreate })).count;
 
   await recordAudit({
     userId: createdById,

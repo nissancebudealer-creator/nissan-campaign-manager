@@ -32,7 +32,7 @@ export function createApp() {
   // parsed object would not reliably reproduce.
   app.use(
     express.json({
-      limit: "2mb",
+      limit: "8mb",
       verify: (req, _res, buf) => {
         (req as express.Request & { rawBody?: Buffer }).rawBody = buf;
       },
