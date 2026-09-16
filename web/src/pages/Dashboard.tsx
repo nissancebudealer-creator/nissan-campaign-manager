@@ -109,6 +109,7 @@ export function Dashboard() {
                         <span>{perf.sent} sent</span>
                         <span>{formatPercent(openRate!)} open rate</span>
                         <span>{formatPercent(clickRate!)} click rate</span>
+                        {perf.bounced > 0 && <span className="text-amber-600">{perf.bounced} bounced</span>}
                       </div>
                     )}
                   </div>

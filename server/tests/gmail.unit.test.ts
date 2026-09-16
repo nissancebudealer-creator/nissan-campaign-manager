@@ -79,6 +79,7 @@ describe("MIME message builder", () => {
       to: "customer@example.com",
       subject: "Hi there",
       html: "<p>Hello!</p>",
+      messageId: "<abc-123@campaign-send.internal>",
     });
     expect(raw).not.toContain("+");
     expect(raw).not.toContain("/");
@@ -88,6 +89,7 @@ describe("MIME message builder", () => {
     expect(decoded).toContain("From: Jo Gahiton <jo@example.com>");
     expect(decoded).toContain("To: customer@example.com");
     expect(decoded).toContain("Subject: Hi there");
+    expect(decoded).toContain("Message-ID: <abc-123@campaign-send.internal>");
     expect(decoded).toContain("<p>Hello!</p>");
   });
 
@@ -98,9 +100,77 @@ describe("MIME message builder", () => {
       to: "b@example.com",
       subject: "Café offer ☕",
       html: "<p>x</p>",
+      messageId: "<x@campaign-send.internal>",
     });
     const decoded = Buffer.from(raw, "base64url").toString("utf8");
     expect(decoded).toMatch(/Subject: =\?UTF-8\?B\?/);
+  });
+});
+
+describe("Gmail bounce detection — real bounce-email parsing (no network/DB, pure logic)", () => {
+  it("matches our own generated Message-ID out of an In-Reply-To/References header, and nothing else", async () => {
+    const { OWN_MESSAGE_ID_PATTERN } = await import("../src/services/gmailBounce.service.js");
+    const ours = "<9f2c1e40-1a2b-4c3d-8e5f-0a1b2c3d4e5f@campaign-send.internal>";
+    expect(`In-Reply-To: ${ours}`).toMatch(OWN_MESSAGE_ID_PATTERN);
+    expect(ours.match(OWN_MESSAGE_ID_PATTERN)?.[0]).toBe(ours);
+    // A reply chain referencing some unrelated Message-ID must not falsely match.
+    expect("<random123@mail.gmail.com>").not.toMatch(OWN_MESSAGE_ID_PATTERN);
+  });
+
+  it("finds a nested message/delivery-status part regardless of multipart depth", async () => {
+    const { findPart } = await import("../src/services/gmailBounce.service.js");
+    const dsnPart = { mimeType: "message/delivery-status", body: { data: "irrelevant" } };
+    const payload = {
+      mimeType: "multipart/report",
+      parts: [
+        { mimeType: "text/plain", body: { data: "human readable part" } },
+        { mimeType: "multipart/mixed", parts: [dsnPart] },
+      ],
+    };
+    expect(findPart(payload, (p) => p.mimeType === "message/delivery-status")).toBe(dsnPart);
+    expect(findPart(payload, (p) => p.mimeType === "does/not-exist")).toBeUndefined();
+  });
+
+  it("extracts the real Diagnostic-Code from a structured DSN part when present", async () => {
+    const { extractBounceReason } = await import("../src/services/gmailBounce.service.js");
+    const dsnText = [
+      "Reporting-MTA: dns; mail.example.com",
+      "Final-Recipient: rfc822; nobody@nonexistent-domain.example",
+      "Action: failed",
+      "Status: 5.1.1",
+      "Diagnostic-Code: smtp; 550 5.1.1 The email account that you tried to reach does not exist.",
+    ].join("\r\n");
+    const message = {
+      snippet: "Delivery incomplete",
+      payload: {
+        mimeType: "multipart/report",
+        parts: [
+          {
+            mimeType: "message/delivery-status",
+            body: { data: Buffer.from(dsnText, "utf8").toString("base64url") },
+          },
+        ],
+      },
+    };
+    expect(extractBounceReason(message)).toBe(
+      "smtp; 550 5.1.1 The email account that you tried to reach does not exist.",
+    );
+  });
+
+  it("falls back to the Status field, then to Gmail's snippet, when Diagnostic-Code is absent", async () => {
+    const { extractBounceReason } = await import("../src/services/gmailBounce.service.js");
+    const statusOnly = {
+      snippet: "fallback snippet",
+      payload: {
+        parts: [
+          { mimeType: "message/delivery-status", body: { data: Buffer.from("Status: 5.2.1").toString("base64url") } },
+        ],
+      },
+    };
+    expect(extractBounceReason(statusOnly)).toBe("Delivery status: 5.2.1");
+
+    const noDsnAtAll = { snippet: "fallback snippet", payload: { parts: [] } };
+    expect(extractBounceReason(noDsnAtAll)).toBe("fallback snippet");
   });
 });
 

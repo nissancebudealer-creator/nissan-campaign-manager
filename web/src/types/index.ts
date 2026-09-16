@@ -248,6 +248,7 @@ export interface CampaignMetrics {
   recipients: number;
   sent: number;
   failed: number;
+  bounced: number;
   opened: number;
   clicked: number;
   unsubscribed: number;
@@ -265,7 +266,7 @@ export interface DashboardSummary {
   activeCampaigns: number;
   scheduledCampaigns: number;
   campaignsSent: number;
-  channelPerformance: Record<string, { sent: number; opened: number; clicked: number }>;
+  channelPerformance: Record<string, { sent: number; opened: number; clicked: number; bounced: number }>;
   campaignVolumeByMonth: Record<string, number>;
   recentActivity: {
     id: string;

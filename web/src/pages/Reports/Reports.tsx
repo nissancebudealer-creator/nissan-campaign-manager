@@ -59,6 +59,12 @@ export function Reports() {
         not because nothing happened but because there's no honest way to observe it yet.
       </div>
 
+      <div className="mt-2 rounded-md bg-slate-50 p-3 text-xs text-slate-500">
+        <strong className="text-slate-700">Bounced is Email-only.</strong> It counts real bounce
+        notifications Gmail sent back for an invalid or unreachable address, checked every few
+        minutes — WhatsApp and Viber have no equivalent signal, so they'll always show 0 here.
+      </div>
+
       <div className="mt-4 flex gap-2 text-xs">
         <span className="text-slate-500">Sort by:</span>
         {(
@@ -93,6 +99,7 @@ export function Reports() {
               <th className="px-4 py-2">Recipients</th>
               <th className="px-4 py-2">Sent</th>
               <th className="px-4 py-2">Failed</th>
+              <th className="px-4 py-2">Bounced</th>
               <th className="px-4 py-2">Opened</th>
               <th className="px-4 py-2">Clicked</th>
               <th className="px-4 py-2">Open rate</th>
@@ -103,14 +110,14 @@ export function Reports() {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={11} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={12} className="px-4 py-6 text-center text-slate-400">
                   Loading…
                 </td>
               </tr>
             )}
             {!loading && sorted.length === 0 && (
               <tr>
-                <td colSpan={11} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={12} className="px-4 py-6 text-center text-slate-400">
                   No sent campaigns yet.
                 </td>
               </tr>
@@ -137,6 +144,7 @@ export function Reports() {
                   <td className="px-4 py-2 text-slate-600">{metrics.recipients}</td>
                   <td className="px-4 py-2 text-slate-600">{metrics.sent}</td>
                   <td className="px-4 py-2 text-red-600">{metrics.failed}</td>
+                  <td className="px-4 py-2 text-amber-600">{metrics.bounced}</td>
                   <td className="px-4 py-2 text-slate-600">{metrics.opened}</td>
                   <td className="px-4 py-2 text-slate-600">{metrics.clicked}</td>
                   <td className="px-4 py-2 font-medium text-slate-900">

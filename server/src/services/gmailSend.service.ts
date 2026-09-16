@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { google } from "googleapis";
 import { prisma } from "../lib/prisma.js";
 import { encryptSecret } from "../lib/crypto.js";
@@ -5,6 +6,11 @@ import { AppError } from "../utils/AppError.js";
 import { buildMimeMessage, formatDisplayAddress } from "../lib/mime.js";
 import { clientFromStoredConfig, readGmailConfig } from "./gmailAuth.service.js";
 import { DEFAULT_DAILY_LIMIT, MAX_SEND_RETRIES, RETRY_BASE_DELAY_MS } from "../config/gmailLimits.js";
+
+// Domain half of the Message-ID we set on every outgoing email — doesn't need to resolve to
+// anything, just needs to be distinctive enough that gmailBounce.service.ts can reliably pick our
+// own generated ids back out of a bounce notification's In-Reply-To/References header.
+export const MESSAGE_ID_DOMAIN = "campaign-send.internal";
 
 function todayUTC(): string {
   return new Date().toISOString().slice(0, 10);
@@ -63,7 +69,9 @@ interface SendEmailInput {
   html: string;
 }
 
-export async function sendEmailViaGmail(input: SendEmailInput): Promise<{ providerMessageId: string }> {
+export async function sendEmailViaGmail(
+  input: SendEmailInput,
+): Promise<{ providerMessageId: string; messageIdHeader: string }> {
   const { integration, config } = await loadConnectedGmail();
   await reserveSendSlot(integration.id, config);
 
@@ -95,11 +103,13 @@ export async function sendEmailViaGmail(input: SendEmailInput): Promise<{ provid
   });
 
   const gmail = google.gmail({ version: "v1", auth: client });
+  const messageIdHeader = `<${crypto.randomUUID()}@${MESSAGE_ID_DOMAIN}>`;
   const raw = buildMimeMessage({
     from: formatDisplayAddress(config.senderName || config.email, config.email),
     to: input.to,
     subject: input.subject,
     html: input.html,
+    messageId: messageIdHeader,
   });
 
   let lastError: unknown;
@@ -107,7 +117,7 @@ export async function sendEmailViaGmail(input: SendEmailInput): Promise<{ provid
     try {
       const { data } = await gmail.users.messages.send({ userId: "me", requestBody: { raw } });
       if (!data.id) throw new Error("Gmail API returned no message id");
-      return { providerMessageId: data.id };
+      return { providerMessageId: data.id, messageIdHeader };
     } catch (err) {
       lastError = err;
       if (!isTransientError(err) || attempt === MAX_SEND_RETRIES) break;

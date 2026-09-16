@@ -61,6 +61,18 @@ review actual usage before large sends.
     bounced) — there is no API call that would let us honestly claim "delivered", so the Reports
     UI reports "Sent" instead and says so explicitly, rather than quietly relabeling one for the
     other.
+  - **"Bounced" (added after Phase 10) is real, but asymmetric with "Delivered" — read it
+    carefully.** A periodic check (`gmailBounce.service.ts`, every 5 minutes) reads the connected
+    Gmail inbox for real bounce-notification emails and matches each one back to the exact
+    campaign send via a Message-ID we set ourselves, never by guessing from an address or
+    timestamp. This required expanding the Gmail OAuth scope from send-only to also include
+    `gmail.readonly` — reconnecting Gmail is what grants it, nothing here reads or exposes any
+    other mail in the inbox. A message counted as "Bounced" definitely failed — that's a real
+    provider-relayed rejection. The reverse is **not** true: a message *not* marked Bounced was
+    not confirmed delivered either, only that no bounce notification was found (or none had
+    arrived yet — some rejections are silently dropped by the receiving server with no DSN at
+    all, which is invisible to this or any sender). "Bounced" narrows "Sent" into "definitely
+    failed" vs. "no failure signal seen" — it does not upgrade the remainder into "Delivered".
   - **"Conversion" is deliberately never shown.** No goal or e-commerce integration exists to
     attribute a conversion (e.g. a test drive booked, a vehicle purchased) to a specific campaign
     send — inventing a conversion number with no underlying event to justify it would violate

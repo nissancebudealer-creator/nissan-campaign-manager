@@ -59,10 +59,15 @@ one-time setup only you can do (it needs your Google login):
      app is in "Testing" status, only these addresses can complete the consent flow (no full
      Google verification review needed for internal/small-scale use)
    - **Important**: under **Data Access**, click **Add or remove scopes** and explicitly add
-     `https://www.googleapis.com/auth/gmail.send`. Scopes that aren't registered here get silently
-     dropped from the consent grant even if the app requests them — this bit us once during
-     development (see ARCHITECTURE.md / memory notes) and shows up as a `403 Insufficient
-     Permission` error from the Gmail API the first time you try to send, not at connect time.
+     `https://www.googleapis.com/auth/gmail.send` **and**
+     `https://www.googleapis.com/auth/gmail.readonly` (the second one is what lets the app read
+     real bounce-notification emails back — see COMPLIANCE.md). Scopes that aren't registered here
+     get silently dropped from the consent grant even if the app requests them — this bit us once
+     during development (see ARCHITECTURE.md / memory notes) and shows up as a `403 Insufficient
+     Permission` error from the Gmail API the first time you try to send or check for bounces, not
+     at connect time. `gmail.readonly` is a Google "restricted" scope — while the app stays in
+     "Testing" status with only your own test users added, no extra Google verification is needed;
+     it only becomes required if you later publish the app for outside users.
 4. **APIs & Services → Credentials → Create Credentials → OAuth client ID**:
    - Application type **Web application**
    - Authorized redirect URIs → add exactly `http://localhost:4000/api/integrations/gmail/callback`

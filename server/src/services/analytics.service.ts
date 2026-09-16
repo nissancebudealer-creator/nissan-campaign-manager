@@ -13,6 +13,7 @@ interface RecipientCounts {
   recipients: number;
   sent: number;
   failed: number;
+  bounced: number;
   opened: number;
   clicked: number;
   unsubscribed: number;
@@ -41,15 +42,20 @@ async function countRecipients(campaignId: string): Promise<RecipientCounts> {
       })
     : 0;
 
-  // SENT/OPENED/CLICKED are all states a *successfully sent* message can currently be in — a
-  // recipient who opened or clicked was, by definition, sent to first. "Sent" here means "the
-  // provider accepted this for delivery", regardless of what happened to it afterward.
-  const successfullySent = (byStatus.SENT ?? 0) + (byStatus.OPENED ?? 0) + (byStatus.CLICKED ?? 0);
+  // SENT/OPENED/CLICKED/BOUNCED are all states a *successfully sent* message can currently be in
+  // — a recipient who opened, clicked, or bounced was, by definition, sent to first. "Sent" here
+  // means "the provider accepted this for delivery", regardless of what happened to it afterward
+  // — a bounce is a real, separately-reported outcome, not a subtraction from "sent".
+  const successfullySent =
+    (byStatus.SENT ?? 0) + (byStatus.OPENED ?? 0) + (byStatus.CLICKED ?? 0) + (byStatus.BOUNCED ?? 0);
 
   return {
     recipients,
     sent: successfullySent,
     failed: byStatus.FAILED ?? 0,
+    // Only ever non-zero for EMAIL — a real bounce-notification email matched back to this send
+    // via its Message-ID (see gmailBounce.service.ts), not inferred from silence or time elapsed.
+    bounced: byStatus.BOUNCED ?? 0,
     opened: (byStatus.OPENED ?? 0) + (byStatus.CLICKED ?? 0),
     clicked: byStatus.CLICKED ?? 0,
     unsubscribed,
@@ -108,10 +114,13 @@ export async function getDashboardSummary() {
     select: { id: true, channel: true, sentAt: true },
   });
 
-  const channelPerformance: Record<string, { sent: number; opened: number; clicked: number }> = {
-    EMAIL: { sent: 0, opened: 0, clicked: 0 },
-    WHATSAPP: { sent: 0, opened: 0, clicked: 0 },
-    VIBER: { sent: 0, opened: 0, clicked: 0 },
+  const channelPerformance: Record<
+    string,
+    { sent: number; opened: number; clicked: number; bounced: number }
+  > = {
+    EMAIL: { sent: 0, opened: 0, clicked: 0, bounced: 0 },
+    WHATSAPP: { sent: 0, opened: 0, clicked: 0, bounced: 0 },
+    VIBER: { sent: 0, opened: 0, clicked: 0, bounced: 0 },
   };
   const campaignVolumeByMonth: Record<string, number> = {};
 
@@ -120,6 +129,7 @@ export async function getDashboardSummary() {
     channelPerformance[campaign.channel].sent += counts.sent;
     channelPerformance[campaign.channel].opened += counts.opened;
     channelPerformance[campaign.channel].clicked += counts.clicked;
+    channelPerformance[campaign.channel].bounced += counts.bounced;
 
     if (campaign.sentAt) {
       const monthKey = campaign.sentAt.toISOString().slice(0, 7); // YYYY-MM

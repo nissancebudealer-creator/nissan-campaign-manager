@@ -330,6 +330,13 @@ export function Help() {
             You'll never see a "Delivered" or "Conversion" number here — neither channel actually
             confirms those, so this app doesn't invent numbers it can't back up.
           </Note>
+          <Note tone="warn">
+            "Bounced" (Email only) is checked every few minutes against your Gmail inbox for real
+            bounce-notification emails, matched back to the exact send. A high bounced count means
+            those specific addresses are genuinely invalid or unreachable — but a low one doesn't
+            mean everything else was delivered, only that no bounce was seen (some providers drop
+            a failed message silently, with no notification at all).
+          </Note>
         </section>
 
         <section>

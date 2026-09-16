@@ -7,11 +7,17 @@ import { prisma } from "../lib/prisma.js";
 import { encryptSecret, decryptSecret } from "../lib/crypto.js";
 import { recordAudit } from "./audit.service.js";
 
-// Read-only send scope plus the minimal profile scope needed to confirm which Gmail address is
-// connected (shown back to the user, and used as the outgoing From address — Gmail's API will
-// reject any From that isn't the authenticated account, so this is not optional).
+// Send scope, the minimal profile scope needed to confirm which Gmail address is connected
+// (shown back to the user, and used as the outgoing From address — Gmail's API will reject any
+// From that isn't the authenticated account, so this is not optional), and read-only access —
+// added specifically so the periodic bounce check (gmailBounce.service.ts) can find and parse
+// real bounce-notification emails Gmail delivers back to this inbox. Deliberately gmail.readonly,
+// not gmail.modify — bounce detection only ever needs to read; it never labels, trashes, or
+// otherwise changes anything in the account (see ProcessedBounceEmail for how it avoids
+// re-scanning the same message without needing write access).
 const SCOPES = [
   "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/userinfo.email",
 ];
 

@@ -43,6 +43,11 @@ project's Storage tab named to match `SUPABASE_STORAGE_BUCKET` (defaults to `cam
 then copy `SUPABASE_URL` and the `service_role` key from Project Settings > API. Without these set,
 uploading an image returns a clear error rather than silently writing to disk.
 
+**Reconnect Gmail once after deploying bounce detection.** Gmail's OAuth scope changed from
+send-only to also include `gmail.readonly` (see COMPLIANCE.md) — an already-connected integration
+keeps working for sending, but won't have permission to read bounce notifications until you
+disconnect and reconnect Gmail once under Integrations, granting the new scope.
+
 ## Build commands
 
 ```bash
