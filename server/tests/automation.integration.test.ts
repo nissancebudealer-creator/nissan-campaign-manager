@@ -143,6 +143,13 @@ describe("automatic triggers", () => {
     await modules.contactService.updateContact(contact.id, { notes: "still hot" }, testUserId);
     enrollments = await modules.prisma.automationEnrollment.findMany({ where: { automationRuleId: rule.id, contactId: contact.id } });
     expect(enrollments).toHaveLength(1);
+
+    // This step's dayOffset:0 means it's already "due" the moment it's created — cancel it here
+    // rather than leaving a real, deliverable (contacts are opted in by default now) EMAIL
+    // enrollment sitting ACTIVE and due. runDueSteps() sweeps the whole table, not just the rule
+    // under test, so an uncancelled one here would get swept up and really sent to this contact's
+    // fake @phase7test.example address by whichever test runs next and happens to call it.
+    await modules.automationService.cancelEnrollment(enrollments[0].id, testUserId);
   });
 });
 
@@ -162,10 +169,15 @@ describe("manual enrollment", () => {
       testUserId,
     );
 
-    await modules.automationService.enrollContact(rule.id, contact.id, testUserId);
+    const enrollment = await modules.automationService.enrollContact(rule.id, contact.id, testUserId);
     await expect(modules.automationService.enrollContact(rule.id, contact.id, testUserId)).rejects.toThrow(
       "already enrolled",
     );
+
+    // Same reasoning as the LEAD_STATUS_CHANGED test above: this dayOffset:0 step is due
+    // immediately, and contacts are real-deliverable by default now — cancel it so it isn't
+    // swept up (and really sent) by the next test's runDueSteps() call.
+    await modules.automationService.cancelEnrollment(enrollment!.id, testUserId);
   });
 
   it("refuses to enroll into an inactive automation", async () => {
