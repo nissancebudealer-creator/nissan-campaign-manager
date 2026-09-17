@@ -571,10 +571,16 @@ export async function requestSend(
       sentCount += 1;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown send error";
-      const isDailyLimitError =
-        errorMessage.toLowerCase().includes("daily") && errorMessage.toLowerCase().includes("limit reached");
+      const lowerErrorMessage = errorMessage.toLowerCase();
+      const isDailyLimitError = lowerErrorMessage.includes("daily") && lowerErrorMessage.includes("limit reached");
+      // Gmail's own per-user rate limit (separate from our tracked daily counter — see
+      // gmailSend.service.ts's isRateLimitError) — a real provider-side throttle with a ~15-minute
+      // cooldown. Every recipient after the first one to hit it would fail identically, so this
+      // must stop the batch the same way the daily limit does, not burn through the rest of the
+      // list generating the same guaranteed rejection.
+      const isProviderThrottled = isDailyLimitError || lowerErrorMessage.includes("rate limit");
 
-      if (isDailyLimitError) {
+      if (isProviderThrottled) {
         // Not a real failure for this recipient — nothing was actually attempted against the
         // provider. Leave them PENDING (already upserted above) so the next batch/day picks them
         // up automatically instead of permanently recording a failure that was never theirs.

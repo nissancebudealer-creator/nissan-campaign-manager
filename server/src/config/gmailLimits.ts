@@ -11,9 +11,12 @@ export const GMAIL_DAILY_LIMITS = {
 // Gmail account is the common case for a small dealership and the safer (lower) limit to assume.
 export const DEFAULT_DAILY_LIMIT = GMAIL_DAILY_LIMITS.CONSUMER;
 
-// Gmail also enforces an unpublished per-second burst limit; spacing sends out avoids tripping it
-// without needing to know the exact figure.
-export const SEND_DELAY_MS = 250;
+// Gmail also enforces an unpublished per-user rate limit well below the daily cap — empirically
+// hit sending a few hundred messages at 250ms apart, which then throttles the account for ~15
+// minutes (a real "User-rate limit exceeded ... Retry after" rejection, not a guess). 1200ms
+// trades some throughput for actually staying under it — still comfortably fast enough for a
+// deliberately-batched send.
+export const SEND_DELAY_MS = 1200;
 
 export const MAX_SEND_RETRIES = 3;
 export const RETRY_BASE_DELAY_MS = 1000;

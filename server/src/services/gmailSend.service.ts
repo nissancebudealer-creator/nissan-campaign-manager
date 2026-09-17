@@ -63,6 +63,18 @@ function isTransientError(err: unknown): boolean {
   return status === 429 || (typeof status === "number" && status >= 500);
 }
 
+// Gmail's real per-user sending rate limit — distinct from our own tracked 500/day counter (see
+// reserveSendSlot above) — rejects a send with a `Retry after <timestamp>` that's routinely ~15
+// minutes out. Our own short exponential backoff (a few seconds total) can never wait that out,
+// so retrying here is pure waste — every retry is guaranteed to fail identically. Detected from
+// Google's own structured error reason where available, falling back to the message text.
+function isRateLimitError(err: unknown): boolean {
+  const reason = (err as { errors?: { reason?: string }[] })?.errors?.[0]?.reason;
+  if (reason === "userRateLimitExceeded" || reason === "rateLimitExceeded") return true;
+  const message = err instanceof Error ? err.message : "";
+  return /rate limit exceeded/i.test(message);
+}
+
 interface SendEmailInput {
   to: string;
   subject: string;
@@ -120,11 +132,18 @@ export async function sendEmailViaGmail(
       return { providerMessageId: data.id, messageIdHeader };
     } catch (err) {
       lastError = err;
-      if (!isTransientError(err) || attempt === MAX_SEND_RETRIES) break;
+      if (isRateLimitError(err) || !isTransientError(err) || attempt === MAX_SEND_RETRIES) break;
       await sleep(RETRY_BASE_DELAY_MS * 2 ** attempt);
     }
   }
 
   const message = lastError instanceof Error ? lastError.message : "Unknown Gmail API error";
+  if (isRateLimitError(lastError)) {
+    // Tagged distinctly (not just "Gmail send failed") so campaign.service.ts's send loop can
+    // recognize this as a real provider-side throttle — stop the batch and leave the rest of the
+    // recipients untouched, the same as hitting our own daily-limit counter — rather than a
+    // per-recipient rejection.
+    throw new AppError(429, `Gmail rate limit reached: ${message}`);
+  }
   throw new AppError(502, `Gmail send failed: ${message}`);
 }
