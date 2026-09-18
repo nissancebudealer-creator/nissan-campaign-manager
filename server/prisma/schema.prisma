@@ -344,10 +344,6 @@ model CampaignMessage {
   campaignRecipient   CampaignRecipient @relation(fields: [campaignRecipientId], references: [id], onDelete: Cascade)
   channel             Channel
   providerMessageId   String?
-  // The RFC 5322 Message-ID header WE set on the outgoing email (EMAIL channel only) — a real
-  // bounce notification's In-Reply-To/References header is matched back against this value to
-  // attribute the bounce to the right recipient. Never set for WhatsApp/Viber.
-  messageIdHeader     String?           @unique
   rawStatus           String?
   errorMessage        String?
   sentAt              DateTime          @default(now())

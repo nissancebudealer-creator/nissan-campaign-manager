@@ -79,7 +79,6 @@ describe("MIME message builder", () => {
       to: "customer@example.com",
       subject: "Hi there",
       html: "<p>Hello!</p>",
-      messageId: "<abc-123@campaign-send.internal>",
     });
     expect(raw).not.toContain("+");
     expect(raw).not.toContain("/");
@@ -89,7 +88,6 @@ describe("MIME message builder", () => {
     expect(decoded).toContain("From: Jo Gahiton <jo@example.com>");
     expect(decoded).toContain("To: customer@example.com");
     expect(decoded).toContain("Subject: Hi there");
-    expect(decoded).toContain("Message-ID: <abc-123@campaign-send.internal>");
     expect(decoded).toContain("<p>Hello!</p>");
   });
 
@@ -100,7 +98,6 @@ describe("MIME message builder", () => {
       to: "b@example.com",
       subject: "Café offer ☕",
       html: "<p>x</p>",
-      messageId: "<x@campaign-send.internal>",
     });
     const decoded = Buffer.from(raw, "base64url").toString("utf8");
     expect(decoded).toMatch(/Subject: =\?UTF-8\?B\?/);
@@ -108,13 +105,22 @@ describe("MIME message builder", () => {
 });
 
 describe("Gmail bounce detection — real bounce-email parsing (no network/DB, pure logic)", () => {
-  it("matches our own generated Message-ID out of an In-Reply-To/References header, and nothing else", async () => {
-    const { OWN_MESSAGE_ID_PATTERN } = await import("../src/services/gmailBounce.service.js");
-    const ours = "<9f2c1e40-1a2b-4c3d-8e5f-0a1b2c3d4e5f@campaign-send.internal>";
-    expect(`In-Reply-To: ${ours}`).toMatch(OWN_MESSAGE_ID_PATTERN);
-    expect(ours.match(OWN_MESSAGE_ID_PATTERN)?.[0]).toBe(ours);
-    // A reply chain referencing some unrelated Message-ID must not falsely match.
-    expect("<random123@mail.gmail.com>").not.toMatch(OWN_MESSAGE_ID_PATTERN);
+  it("extracts the failed recipient's address directly from Gmail's own bounce snippet", async () => {
+    const { extractFailedAddress } = await import("../src/services/gmailBounce.service.js");
+    // Confirmed against real bounces in this app's own inbox — Gmail does not preserve a custom
+    // Message-ID header on send, so correlation has to work from the address Gmail itself names.
+    const hardBounce = {
+      snippet:
+        "Address not found Your message wasn't delivered to reymarkcabalkero46@gmail.com because the address couldn't be found, or is unable to receive mail.",
+    };
+    expect(extractFailedAddress(hardBounce)).toBe("reymarkcabalkero46@gmail.com");
+
+    const tempFailure = {
+      snippet: "Delivery incomplete There was a temporary problem delivering your message to jane.doe@example.org.",
+    };
+    expect(extractFailedAddress(tempFailure)).toBe("jane.doe@example.org");
+
+    expect(extractFailedAddress({ snippet: "no address in here at all" })).toBeUndefined();
   });
 
   it("finds a nested message/delivery-status part regardless of multipart depth", async () => {

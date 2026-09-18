@@ -511,9 +511,6 @@ export async function requestSend(
 
     try {
       let providerMessageId: string;
-      // Only ever set for EMAIL — this is what a later bounce notification's In-Reply-To/
-      // References header gets matched against, see gmailBounce.service.ts.
-      let messageIdHeader: string | undefined;
 
       if (existing.channel === "EMAIL") {
         const subject = renderPersonalization(existing.subject ?? "", personalizationContext);
@@ -531,7 +528,6 @@ export async function requestSend(
         });
         const result = await sendEmailViaGmail({ to: contact.email!, subject, html });
         providerMessageId = result.providerMessageId;
-        messageIdHeader = result.messageIdHeader;
       } else if (existing.channel === "WHATSAPP") {
         const bodyParams = whatsappBodyVariables.map(
           (name) => personalizationContext[name as keyof PersonalizationContext] ?? "",
@@ -563,7 +559,6 @@ export async function requestSend(
             campaignRecipientId: campaignRecipient.id,
             channel: existing.channel,
             providerMessageId,
-            messageIdHeader,
             rawStatus: "sent",
           },
         }),

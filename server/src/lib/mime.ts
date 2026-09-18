@@ -3,11 +3,6 @@ interface MimeMessageInput {
   to: string;
   subject: string;
   html: string;
-  // Our own Message-ID (see gmailSend.service.ts) — set explicitly, rather than left to Gmail's
-  // auto-generated one, so a later bounce notification's In-Reply-To/References header can be
-  // matched back to this exact send. Full RFC 5322 form including angle brackets, e.g.
-  // "<uuid@campaign-manager>".
-  messageId: string;
 }
 
 function encodeHeaderValue(value: string): string {
@@ -34,7 +29,6 @@ export function buildMimeMessage(input: MimeMessageInput): string {
     `From: ${input.from}`,
     `To: ${input.to}`,
     `Subject: ${encodeHeaderValue(input.subject)}`,
-    `Message-ID: ${input.messageId}`,
     "MIME-Version: 1.0",
     'Content-Type: text/html; charset="UTF-8"',
     "Content-Transfer-Encoding: 7bit",
