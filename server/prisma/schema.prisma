@@ -95,6 +95,12 @@ model Contact {
   lastName          String
   company           String?
   email             String?
+  // Whether email's domain has a real mail server (DNS MX lookup — see emailDomainValidation.ts).
+  // null = never checked (e.g. no email, or created before this field existed) and treated as
+  // passing; true = confirmed has an MX record; false = confirmed no MX record, the one value
+  // that actually excludes a contact from an EMAIL send (see channelAddressWhere). Computed once
+  // at creation/import time, not re-checked on every send.
+  emailDomainValid  Boolean?
   mobileNumber      String?
   whatsappNumber    String?
   viberNumber       String?

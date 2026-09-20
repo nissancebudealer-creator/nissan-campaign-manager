@@ -279,7 +279,15 @@ export function deliverableWhere(channel: Channel): Prisma.ContactWhereInput {
 export function channelAddressWhere(channel: Channel): Prisma.ContactWhereInput {
   switch (channel) {
     case "EMAIL":
-      return { email: { not: null } };
+      // emailDomainValid is a real DNS MX-record check computed once at creation/import time (see
+      // emailDomainValidation.ts), not re-checked here — excludes only a domain CONFIRMED to have
+      // no mail server (false). null (never checked) and true both pass, so contacts that predate
+      // this feature keep working exactly as before. Spelled out as an explicit OR rather than
+      // `NOT: { emailDomainValid: false }` — confirmed against the real database that Prisma's NOT
+      // compiles to SQL's `!= false`, and by SQL's three-valued logic a NULL column never satisfies
+      // that comparison, which would have silently excluded every contact created before this
+      // field existed (all of them, at first) from every EMAIL campaign.
+      return { email: { not: null }, OR: [{ emailDomainValid: null }, { emailDomainValid: true }] };
     case "WHATSAPP":
       return { whatsappNumber: { not: null } };
     case "VIBER":

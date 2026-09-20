@@ -144,6 +144,32 @@ describe("audience preview", () => {
     const optedInChannels = history.filter((c) => c.optIn).map((c) => c.channel);
     expect(optedInChannels.sort()).toEqual(["EMAIL", "VIBER", "WHATSAPP"]);
   });
+
+  it("excludes a fully opted-in contact whose email domain has no real mail server", async () => {
+    const { contactService, campaignService } = modules;
+    // Deliberately a real (if nonexistent) domain, not *.example — reserved documentation domains
+    // are treated as "unknown" rather than a real signal (see emailDomainValidation.unit.test.ts),
+    // so this needs a domain the check can actually confirm has no MX records. Cleaned up inline
+    // since it falls outside this file's usual TEST_EMAIL_DOMAIN-scoped afterAll.
+    const deadDomainContact = await contactService.createContact(
+      {
+        firstName: "DeadDomain",
+        lastName: "Contact",
+        email: "nissan-campaign-test-marker@this-domain-definitely-does-not-exist-abc123xyz-nissan-test.com",
+        leadStatus: "Hot",
+      },
+      testUserId,
+    );
+    try {
+      expect(deadDomainContact.emailDomainValid).toBe(false);
+      const preview = await campaignService.previewAudience(segmentId, "EMAIL");
+      expect(preview.noAddressCount).toBeGreaterThanOrEqual(1);
+      const sampleIds = preview.sample.map((c) => c.id);
+      expect(sampleIds).not.toContain(deadDomainContact.id);
+    } finally {
+      await contactService.deleteContact(deadDomainContact.id, testUserId);
+    }
+  }, 15000);
 });
 
 describe("campaign CRUD and lifecycle", () => {

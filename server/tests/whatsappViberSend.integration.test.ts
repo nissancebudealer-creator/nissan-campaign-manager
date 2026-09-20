@@ -193,7 +193,8 @@ describe("WhatsApp send gating", () => {
 
     const reloaded = await modules.prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id } });
     expect(reloaded.status).not.toBe("SENDING");
-  });
+  }, 30000); // no real network call happens here, but the tight 20s default has been observed to
+  // flake under full-suite load — same reasoning as the sibling tests' explicit timeouts below.
 
   it("attempts a real send with an invalid token and honestly records it as FAILED, never fabricating SENT", async () => {
     const integration = await modules.prisma.integration.findFirstOrThrow({
@@ -248,8 +249,9 @@ describe("WhatsApp send gating", () => {
 
     const reloaded = await modules.prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id } });
     expect(reloaded.status).toBe("FAILED");
-  }, 30000); // a real outbound call to Meta's Graph API, competing with 12+ other test files
-  // hammering Supabase concurrently — occasionally exceeds the 20s default under that load.
+  }, 45000); // a real outbound call to Meta's Graph API, competing with 12+ other test files
+  // hammering Supabase concurrently, plus the pacing/DNS-lookup latency added elsewhere today —
+  // occasionally exceeded even 30s under full-suite load.
 
   it("caps a send to batchSize, stays resumable (SENDING) with an accurate remaining count, and picks up the rest on the next call", async () => {
     const { prisma, campaignService, contactService, consentService, tagService } = modules;
@@ -327,7 +329,11 @@ describe("WhatsApp send gating", () => {
     const recipientsAfterSecondBatch = await prisma.campaignRecipient.findMany({ where: { campaignId: campaign.id } });
     expect(recipientsAfterSecondBatch).toHaveLength(3);
     expect(recipientsAfterSecondBatch.every((r) => r.status === "FAILED")).toBe(true);
-  }, 45000); // two real outbound Meta API round-trips across 3 contacts each, competing with the
+  }, 90000); // 3 real outbound Meta API attempts total across both batches (each historically
+  // 15-25s alone per this file's other real-send tests), plus SEND_DELAY_MS pacing between each
+  // (raised from 250ms to 1200ms fixing a real Gmail rate-limit issue, and applied to every
+  // channel's send loop, not just Gmail) and a real DNS lookup on each of the 3 contacts created —
+  // competing with the rest of the suite hammering Supabase concurrently.
   // rest of the suite hammering Supabase concurrently.
 });
 

@@ -119,6 +119,35 @@ describe("contact CRUD", () => {
     ).rejects.toThrow("already exists");
   });
 
+  it("records a real MX-check result on the contact — true for a real domain, false for one with no mail server", async () => {
+    const { contactService } = modules;
+    // Deliberately NOT a *.example address (the file's usual TEST_EMAIL_DOMAIN) — those are RFC
+    // 2606 reserved documentation domains that this feature correctly treats as "unknown" rather
+    // than a real signal (see emailDomainValidation.unit.test.ts), so this needs a genuinely real
+    // domain to actually exercise the check. Cleaned up inline since it falls outside this file's
+    // usual TEST_EMAIL_DOMAIN-scoped afterAll.
+    const validDomainContact = await contactService.createContact(
+      { firstName: "RealDomain", lastName: "Contact", email: "nissan-test-marker-valid@gmail.com" },
+      testUserId,
+    );
+    const invalidDomainContact = await contactService.createContact(
+      {
+        firstName: "DeadDomain",
+        lastName: "Contact",
+        email: "nissan-test-marker-invalid@this-domain-definitely-does-not-exist-abc123xyz-nissan-test.com",
+      },
+      testUserId,
+    );
+
+    try {
+      expect(validDomainContact.emailDomainValid).toBe(true);
+      expect(invalidDomainContact.emailDomainValid).toBe(false);
+    } finally {
+      await contactService.deleteContact(validDomainContact.id, testUserId);
+      await contactService.deleteContact(invalidDomainContact.id, testUserId);
+    }
+  }, 15000);
+
   it("lists and searches contacts", async () => {
     const { contactService } = modules;
     await contactService.createContact(
@@ -206,6 +235,18 @@ describe("CSV import validation", () => {
     const result = await contactService.commitImport(validRows, testUserId);
     expect(result.created).toBe(1);
   });
+
+  it("flags a row whose email domain genuinely has no mail server, and suggests the likely typo fix", async () => {
+    const { contactService, validateImportRow } = modules;
+    // gmial.com is a real near-miss typo of gmail.com and genuinely has no MX records — this is
+    // the exact pattern (a real "gmail.co" address in a sent campaign) that got this app's Google
+    // Cloud project flagged for abuse, which is why this feature exists at all.
+    const rows = [{ firstName: "Typo", lastName: "Domain", email: "typo-domain-phase2test@gmial.com" }];
+    const results = await contactService.validateImportRows(rows, validateImportRow);
+    expect(results[0].status).toBe("invalid");
+    expect(results[0].errors?.[0]).toMatch(/no mail server/i);
+    expect(results[0].errors?.[0]).toMatch(/did you mean "gmail\.com"/i);
+  }, 10000);
 
   it("opts an imported contact in on every channel by default", async () => {
     const { prisma, contactService, consentService, validateImportRow } = modules;

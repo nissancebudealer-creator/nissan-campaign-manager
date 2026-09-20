@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
 import { recordAudit } from "./audit.service.js";
 import { evaluateNewContactTrigger, evaluateLeadStatusTrigger } from "./automation.service.js";
+import { checkEmailDomains, checkMxRecord, domainOf, suggestDomainCorrection } from "../lib/emailDomainValidation.js";
 import type { validateImportRow } from "../schemas/contact.schema.js";
 
 // Every new contact is opted in on all channels by default (business decision — the app no
@@ -106,9 +107,20 @@ async function assertNoDuplicateEmail(email: string | null, excludeId?: string) 
   }
 }
 
+// Real DNS check (see emailDomainValidation.ts), not a hard gate on manual entry — a human already
+// deliberately chose to add this specific contact, so this only computes and stores the result for
+// the campaign send filter to act on later, rather than blocking on a single slow DNS lookup or an
+// address that's genuinely fine for other channels (WhatsApp/Viber) even if email bounces.
+async function computeEmailDomainValid(email: string | null): Promise<boolean | null> {
+  if (!email) return null;
+  const result = await checkMxRecord(domainOf(email));
+  return result === "unknown" ? null : result === "valid";
+}
+
 export async function createContact(input: ContactInput, createdById: string) {
   const email = normalizeEmail(input.email);
   await assertNoDuplicateEmail(email);
+  const emailDomainValid = await computeEmailDomainValid(email);
 
   const contact = await prisma.contact.create({
     data: {
@@ -116,6 +128,7 @@ export async function createContact(input: ContactInput, createdById: string) {
       lastName: input.lastName,
       company: input.company || null,
       email,
+      emailDomainValid,
       mobileNumber: input.mobileNumber || null,
       whatsappNumber: input.whatsappNumber || null,
       viberNumber: input.viberNumber || null,
@@ -164,6 +177,9 @@ export async function updateContact(id: string, input: Partial<ContactInput>, ac
   }
 
   const email = input.email !== undefined ? normalizeEmail(input.email) : undefined;
+  // Only recomputed when the email is actually changing — leaving it alone otherwise preserves
+  // whatever was already established (including a prior real check's result).
+  const emailDomainValid = email !== undefined ? await computeEmailDomainValid(email) : undefined;
   if (email !== undefined) {
     await assertNoDuplicateEmail(email, id);
   }
@@ -179,6 +195,7 @@ export async function updateContact(id: string, input: Partial<ContactInput>, ac
       lastName: input.lastName,
       company: input.company === undefined ? undefined : input.company || null,
       email,
+      emailDomainValid,
       mobileNumber: input.mobileNumber === undefined ? undefined : input.mobileNumber || null,
       whatsappNumber: input.whatsappNumber === undefined ? undefined : input.whatsappNumber || null,
       viberNumber: input.viberNumber === undefined ? undefined : input.viberNumber || null,
@@ -289,6 +306,9 @@ export async function validateImportRows(
 ) {
   const results: ImportRowResult[] = [];
   const seenEmails = new Set<string>();
+  // Rows that pass every synchronous check and carry an email — held back from a final "valid"
+  // verdict until the batched real DNS check below confirms the domain can actually receive mail.
+  const pendingDomainCheck: { result: ImportRowResult; email: string }[] = [];
 
   const existingEmails = new Set(
     (
@@ -321,8 +341,25 @@ export async function validateImportRows(
     }
 
     if (email) seenEmails.add(email);
-    results.push({ rowNumber, data: raw, status: "valid" });
+    const result: ImportRowResult = { rowNumber, data: raw, status: "valid" };
+    results.push(result);
+    if (email) pendingDomainCheck.push({ result, email });
   });
+
+  // Batched by distinct domain (see emailDomainValidation.ts), so a large import with many rows
+  // sharing a handful of real providers costs only a handful of real DNS lookups, not one per row.
+  const domainResults = await checkEmailDomains(pendingDomainCheck.map((p) => p.email));
+  for (const { result, email } of pendingDomainCheck) {
+    const domain = domainOf(email);
+    if (domainResults.get(domain) === "invalid") {
+      result.status = "invalid";
+      const suggestion = suggestDomainCorrection(domain);
+      result.errors = [
+        `email: "${domain}" has no mail server and can't receive email` +
+          (suggestion ? ` — did you mean "${suggestion}"?` : ""),
+      ];
+    }
+  }
 
   return results;
 }
@@ -340,12 +377,18 @@ export async function commitImport(rows: Record<string, string>[], createdById: 
   const seenEmails = new Set<string>();
   const toCreate: Prisma.ContactCreateManyInput[] = [];
 
+  // Batched once for every row here (not per row) — same reasoning as validateImportRows. Rows
+  // reaching commit should already have been filtered to "valid" by the preview step, but this is
+  // computed fresh rather than trusted from an earlier, possibly-stale preview call.
+  const domainResults = await checkEmailDomains(rows.map((r) => r.email));
+
   for (const row of rows) {
     const email = row.email ? row.email.trim().toLowerCase() : null;
     if (email) {
       if (existingEmails.has(email) || seenEmails.has(email)) continue;
       seenEmails.add(email);
     }
+    const domainResult = email ? domainResults.get(domainOf(email)) : undefined;
 
     toCreate.push({
       // Generated up front (rather than left to Prisma's own cuid() default) so the id is known
@@ -355,6 +398,7 @@ export async function commitImport(rows: Record<string, string>[], createdById: 
       lastName: row.lastName.trim(),
       company: row.company?.trim() || null,
       email,
+      emailDomainValid: domainResult === undefined || domainResult === "unknown" ? null : domainResult === "valid",
       mobileNumber: row.mobileNumber?.trim() || null,
       whatsappNumber: row.whatsappNumber?.trim() || null,
       viberNumber: row.viberNumber?.trim() || null,
