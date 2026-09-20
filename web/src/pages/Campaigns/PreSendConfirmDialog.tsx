@@ -43,13 +43,15 @@ export function PreSendConfirmDialog({
           response.remainingCount > 0
             ? ` ${response.remainingCount} recipient${response.remainingCount === 1 ? "" : "s"} still to go — click "Send next batch" to continue.`
             : " Everyone eligible has now been sent to.";
-        setResult({
-          ok: true,
-          message:
-            response.failedCount > 0
-              ? `Sent ${response.sentCount}, ${response.failedCount} failed — check the campaign's sending log.${remainingNote}`
-              : `Sent ${response.sentCount} message${response.sentCount === 1 ? "" : "s"}.${remainingNote}`,
-        });
+        // throttledReason is only ever set when the batch stopped early because of a real
+        // provider-side limit (daily cap or Gmail's shorter-window rate limit), not a per-
+        // recipient failure — surfaced verbatim so "0 sent" never looks like an unexplained bug.
+        const message = response.throttledReason
+          ? `${response.throttledReason} (${response.sentCount} sent this batch.)`
+          : response.failedCount > 0
+            ? `Sent ${response.sentCount}, ${response.failedCount} failed — check the campaign's sending log.${remainingNote}`
+            : `Sent ${response.sentCount} message${response.sentCount === 1 ? "" : "s"}.${remainingNote}`;
+        setResult({ ok: true, message });
         onSent?.();
       }
     } catch (err) {
