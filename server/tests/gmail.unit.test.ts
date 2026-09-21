@@ -248,3 +248,10 @@ describe("Gmail configuration guard", () => {
     expect(() => getAuthUrl(signConnectState("user_123"))).toThrow(/not configured/);
   });
 });
+
+describe("Gmail rate limits configuration", () => {
+  it("uses a conservative send delay of at least 2500ms to stay under Google's 6,000 units/min per-user quota", async () => {
+    const { SEND_DELAY_MS } = await import("../src/config/gmailLimits.js");
+    expect(SEND_DELAY_MS).toBeGreaterThanOrEqual(2500);
+  });
+});

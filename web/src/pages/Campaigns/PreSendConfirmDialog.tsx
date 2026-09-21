@@ -23,7 +23,10 @@ export function PreSendConfirmDialog({
   onSent,
 }: PreSendConfirmDialogProps) {
   const [sending, setSending] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [result, setResult] = useState<{
+    type: "success" | "warning" | "error";
+    message: string;
+  } | null>(null);
   const [batchSize, setBatchSize] = useState("");
 
   if (!open || !campaign) return null;
@@ -37,7 +40,7 @@ export function PreSendConfirmDialog({
       const parsedBatchSize = batchSize.trim() ? Number(batchSize) : undefined;
       const response = await campaignsApi.send(campaign!.id, testMode, parsedBatchSize);
       if ("testSentTo" in response) {
-        setResult({ ok: true, message: `Test email sent to ${response.testSentTo}.` });
+        setResult({ type: "success", message: `Test email sent to ${response.testSentTo}.` });
       } else {
         const remainingNote =
           response.remainingCount > 0
@@ -45,18 +48,28 @@ export function PreSendConfirmDialog({
             : " Everyone eligible has now been sent to.";
         // throttledReason is only ever set when the batch stopped early because of a real
         // provider-side limit (daily cap or Gmail's shorter-window rate limit), not a per-
-        // recipient failure — surfaced verbatim so "0 sent" never looks like an unexplained bug.
-        const message = response.throttledReason
-          ? `${response.throttledReason} (${response.sentCount} sent this batch.)`
-          : response.failedCount > 0
-            ? `Sent ${response.sentCount}, ${response.failedCount} failed — check the campaign's sending log.${remainingNote}`
-            : `Sent ${response.sentCount} message${response.sentCount === 1 ? "" : "s"}.${remainingNote}`;
-        setResult({ ok: true, message });
+        // recipient failure — surfaced distinctly as a warning so it never masquerades as a normal success.
+        if (response.throttledReason) {
+          setResult({
+            type: "warning",
+            message: `${response.throttledReason} (${response.sentCount} sent this batch.)`,
+          });
+        } else if (response.failedCount > 0) {
+          setResult({
+            type: "warning",
+            message: `Sent ${response.sentCount}, ${response.failedCount} failed — check the campaign's sending log.${remainingNote}`,
+          });
+        } else {
+          setResult({
+            type: "success",
+            message: `Sent ${response.sentCount} message${response.sentCount === 1 ? "" : "s"}.${remainingNote}`,
+          });
+        }
         onSent?.();
       }
     } catch (err) {
       setResult({
-        ok: false,
+        type: "error",
         message: err instanceof ApiError ? err.message : "Could not send this campaign.",
       });
     } finally {
@@ -119,14 +132,14 @@ export function PreSendConfirmDialog({
             <input
               type="number"
               min={1}
-              placeholder="e.g. 100"
+              placeholder="e.g. 25 or 50"
               value={batchSize}
               onChange={(e) => setBatchSize(e.target.value)}
               className="input mt-1"
             />
             <span className="mt-1 block text-xs text-slate-400">
-              Sends only this many, then stops — click "Send next batch" afterward to continue.
-              Applies on top of the provider's real daily sending limit, whichever is smaller.
+              Sends only this many, then stops — recommended 25–50 for Gmail to avoid provider rate limits.
+              Click "Send next batch" afterward to continue.
             </span>
           </label>
         )}
@@ -134,7 +147,11 @@ export function PreSendConfirmDialog({
         {result && (
           <div
             className={`mt-4 rounded-md p-3 text-sm ${
-              result.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+              result.type === "success"
+                ? "border border-emerald-200 bg-emerald-50 text-emerald-800"
+                : result.type === "warning"
+                  ? "border border-amber-200 bg-amber-50 text-amber-900"
+                  : "border border-red-200 bg-red-50 text-red-800"
             }`}
           >
             {result.message}
@@ -148,7 +165,7 @@ export function PreSendConfirmDialog({
           >
             Close
           </button>
-          {!result?.ok && (
+          {result?.type !== "success" && (
             <button
               onClick={handleConfirm}
               disabled={

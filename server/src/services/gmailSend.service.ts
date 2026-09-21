@@ -47,6 +47,25 @@ async function reserveSendSlot(integrationId: string, config: ReturnType<typeof 
   return nextConfig;
 }
 
+// Releases a previously reserved send slot if the send ultimately fails (e.g. rate limit, network
+// failure, or API rejection) — ensures failed or throttled attempts never falsely consume the daily limit.
+export async function releaseSendSlot(integrationId: string) {
+  try {
+    const integration = await prisma.integration.findUnique({ where: { id: integrationId } });
+    if (!integration?.config) return;
+    const config = readGmailConfig(integration.config as string);
+    const today = todayUTC();
+    if (config.sentTodayDate !== today) return;
+    const nextConfig = { ...config, sentToday: Math.max(0, (config.sentToday ?? 1) - 1) };
+    await prisma.integration.update({
+      where: { id: integrationId },
+      data: { config: encryptSecret(JSON.stringify(nextConfig)) },
+    });
+  } catch {
+    // Best-effort rollback — do not mask the underlying send error
+  }
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -69,6 +88,26 @@ function isRateLimitError(err: unknown): boolean {
   return /rate limit exceeded/i.test(message);
 }
 
+function extractRateLimitDetail(err: unknown): string | undefined {
+  if (!err || typeof err !== "object") return undefined;
+  const response = (err as { response?: { headers?: Record<string, string> } })?.response;
+  const retryAfter = response?.headers?.["retry-after"];
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (!Number.isNaN(seconds)) {
+      const minutes = Math.ceil(seconds / 60);
+      return `cooldown active, retry in ~${minutes} min`;
+    }
+    return `retry after ${retryAfter}`;
+  }
+  const message = err instanceof Error ? err.message : "";
+  const retryMatch = message.match(/retry after\s+([^\s.)]+)/i);
+  if (retryMatch) {
+    return `retry after ${retryMatch[1]}`;
+  }
+  return undefined;
+}
+
 interface SendEmailInput {
   to: string;
   subject: string;
@@ -79,61 +118,68 @@ export async function sendEmailViaGmail(input: SendEmailInput): Promise<{ provid
   const { integration, config } = await loadConnectedGmail();
   await reserveSendSlot(integration.id, config);
 
-  const client = clientFromStoredConfig(config);
+  try {
+    const client = clientFromStoredConfig(config);
 
-  // Persist a refreshed access token back to encrypted storage so the next send doesn't need to
-  // hit Google's token endpoint again unnecessarily.
-  client.on("tokens", (tokens) => {
-    if (!tokens.access_token) return;
-    prisma.integration
-      .findUnique({ where: { id: integration.id } })
-      .then((current) => {
-        if (!current?.config) return;
-        const latest = readGmailConfig(current.config as string);
-        const updated = {
-          ...latest,
-          accessToken: tokens.access_token!,
-          expiryDate: tokens.expiry_date ?? latest.expiryDate,
-        };
-        return prisma.integration.update({
-          where: { id: integration.id },
-          data: { config: encryptSecret(JSON.stringify(updated)) },
+    // Persist a refreshed access token back to encrypted storage so the next send doesn't need to
+    // hit Google's token endpoint again unnecessarily.
+    client.on("tokens", (tokens) => {
+      if (!tokens.access_token) return;
+      prisma.integration
+        .findUnique({ where: { id: integration.id } })
+        .then((current) => {
+          if (!current?.config) return;
+          const latest = readGmailConfig(current.config as string);
+          const updated = {
+            ...latest,
+            accessToken: tokens.access_token!,
+            expiryDate: tokens.expiry_date ?? latest.expiryDate,
+          };
+          return prisma.integration.update({
+            where: { id: integration.id },
+            data: { config: encryptSecret(JSON.stringify(updated)) },
+          });
+        })
+        .catch(() => {
+          /* best-effort refresh persistence — a failed write here just means one extra token
+             refresh next time, not a lost send */
         });
-      })
-      .catch(() => {
-        /* best-effort refresh persistence — a failed write here just means one extra token
-           refresh next time, not a lost send */
-      });
-  });
+    });
 
-  const gmail = google.gmail({ version: "v1", auth: client });
-  const raw = buildMimeMessage({
-    from: formatDisplayAddress(config.senderName || config.email, config.email),
-    to: input.to,
-    subject: input.subject,
-    html: input.html,
-  });
+    const gmail = google.gmail({ version: "v1", auth: client });
+    const raw = buildMimeMessage({
+      from: formatDisplayAddress(config.senderName || config.email, config.email),
+      to: input.to,
+      subject: input.subject,
+      html: input.html,
+    });
 
-  let lastError: unknown;
-  for (let attempt = 0; attempt <= MAX_SEND_RETRIES; attempt++) {
-    try {
-      const { data } = await gmail.users.messages.send({ userId: "me", requestBody: { raw } });
-      if (!data.id) throw new Error("Gmail API returned no message id");
-      return { providerMessageId: data.id };
-    } catch (err) {
-      lastError = err;
-      if (isRateLimitError(err) || !isTransientError(err) || attempt === MAX_SEND_RETRIES) break;
-      await sleep(RETRY_BASE_DELAY_MS * 2 ** attempt);
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= MAX_SEND_RETRIES; attempt++) {
+      try {
+        const { data } = await gmail.users.messages.send({ userId: "me", requestBody: { raw } });
+        if (!data.id) throw new Error("Gmail API returned no message id");
+        return { providerMessageId: data.id };
+      } catch (err) {
+        lastError = err;
+        if (isRateLimitError(err) || !isTransientError(err) || attempt === MAX_SEND_RETRIES) break;
+        await sleep(RETRY_BASE_DELAY_MS * 2 ** attempt);
+      }
     }
-  }
 
-  const message = lastError instanceof Error ? lastError.message : "Unknown Gmail API error";
-  if (isRateLimitError(lastError)) {
-    // Tagged distinctly (not just "Gmail send failed") so campaign.service.ts's send loop can
-    // recognize this as a real provider-side throttle — stop the batch and leave the rest of the
-    // recipients untouched, the same as hitting our own daily-limit counter — rather than a
-    // per-recipient rejection.
-    throw new AppError(429, `Gmail rate limit reached: ${message}`);
+    const message = lastError instanceof Error ? lastError.message : "Unknown Gmail API error";
+    if (isRateLimitError(lastError)) {
+      // Tagged distinctly (not just "Gmail send failed") so campaign.service.ts's send loop can
+      // recognize this as a real provider-side throttle — stop the batch and leave the rest of the
+      // recipients untouched, the same as hitting our own daily-limit counter — rather than a
+      // per-recipient rejection.
+      const detail = extractRateLimitDetail(lastError);
+      const detailSuffix = detail ? ` [${detail}]` : "";
+      throw new AppError(429, `Gmail rate limit reached${detailSuffix}: ${message}`);
+    }
+    throw new AppError(502, `Gmail send failed: ${message}`);
+  } catch (err) {
+    await releaseSendSlot(integration.id);
+    throw err;
   }
-  throw new AppError(502, `Gmail send failed: ${message}`);
 }

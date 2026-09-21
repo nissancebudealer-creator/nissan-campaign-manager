@@ -590,9 +590,11 @@ export async function requestSend(
         // Not a real failure for this recipient — nothing was actually attempted against the
         // provider. Leave them PENDING (already upserted above) so the next batch/day picks them
         // up automatically instead of permanently recording a failure that was never theirs.
+        const detailMatch = errorMessage.match(/\[(.*?)\]/);
+        const detailSuffix = detailMatch ? ` (${detailMatch[1]})` : "";
         throttledReason = isDailyLimitError
           ? `Stopped: today's daily sending limit has been reached. It resets at UTC midnight — try "Send next batch" again after that.`
-          : `Stopped: Gmail's short-term rate limit was reached (a separate, shorter-window limit from the daily one). This usually clears in about 15 minutes — wait a bit, then try "Send next batch" again.`;
+          : `Stopped: Gmail's short-term rate limit was reached (a separate, shorter-window limit from the daily one)${detailSuffix}. Retrying immediately resets Google's cooldown — please wait before clicking "Send next batch" again.`;
         break;
       }
 
