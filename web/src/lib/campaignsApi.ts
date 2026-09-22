@@ -34,7 +34,7 @@ export const campaignsApi = {
   send: (id: string, testMode: boolean, batchSize?: number) =>
     api.post<
       | { testSentTo: string }
-      | { sentCount: number; failedCount: number; remainingCount: number; throttledReason?: string }
+      | { sentCount: number; failedCount: number; remainingCount: number; throttledReason?: string; throttledUntil?: string }
     >(`/campaigns/${id}/send`, { testMode, batchSize }),
   archive: (id: string) => api.post<{ campaign: Campaign }>(`/campaigns/${id}/archive`),
   unarchive: (id: string) => api.post<{ campaign: Campaign }>(`/campaigns/${id}/unarchive`),

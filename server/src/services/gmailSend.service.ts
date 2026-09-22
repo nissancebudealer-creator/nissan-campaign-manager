@@ -88,22 +88,51 @@ function isRateLimitError(err: unknown): boolean {
   return /rate limit exceeded/i.test(message);
 }
 
-function extractRateLimitDetail(err: unknown): string | undefined {
+function extractRateLimitDetail(err: unknown): { formattedText: string; unlockIso?: string } | undefined {
   if (!err || typeof err !== "object") return undefined;
   const response = (err as { response?: { headers?: Record<string, string> } })?.response;
   const retryAfter = response?.headers?.["retry-after"];
   if (retryAfter) {
     const seconds = Number(retryAfter);
     if (!Number.isNaN(seconds)) {
-      const minutes = Math.ceil(seconds / 60);
-      return `cooldown active, retry in ~${minutes} min`;
+      const unlockDate = new Date(Date.now() + seconds * 1000);
+      const phTime = unlockDate.toLocaleTimeString("en-US", {
+        timeZone: "Asia/Manila",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+      return {
+        formattedText: `retry after ${phTime} PH time`,
+        unlockIso: unlockDate.toISOString(),
+      };
     }
-    return `retry after ${retryAfter}`;
+    return { formattedText: `retry after ${retryAfter}` };
   }
   const message = err instanceof Error ? err.message : "";
   const retryMatch = message.match(/retry after\s+([^\s.)]+)/i);
   if (retryMatch) {
-    return `retry after ${retryMatch[1]}`;
+    const rawTime = retryMatch[1];
+    const withZ = rawTime.endsWith("Z") ? rawTime : rawTime + "Z";
+    let unlockDate = new Date(withZ);
+    if (Number.isNaN(unlockDate.getTime())) {
+      unlockDate = new Date(rawTime);
+    }
+    if (!Number.isNaN(unlockDate.getTime())) {
+      const phTime = unlockDate.toLocaleTimeString("en-US", {
+        timeZone: "Asia/Manila",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+      return {
+        formattedText: `retry after ${phTime} PH time`,
+        unlockIso: unlockDate.toISOString(),
+      };
+    }
+    return {
+      formattedText: `retry after ${rawTime}`,
+    };
   }
   return undefined;
 }
@@ -174,8 +203,9 @@ export async function sendEmailViaGmail(input: SendEmailInput): Promise<{ provid
       // recipients untouched, the same as hitting our own daily-limit counter — rather than a
       // per-recipient rejection.
       const detail = extractRateLimitDetail(lastError);
-      const detailSuffix = detail ? ` [${detail}]` : "";
-      throw new AppError(429, `Gmail rate limit reached${detailSuffix}: ${message}`);
+      const detailSuffix = detail?.formattedText ? ` [${detail.formattedText}]` : "";
+      const unlockSuffix = detail?.unlockIso ? ` {unlock:${detail.unlockIso}}` : "";
+      throw new AppError(429, `Gmail rate limit reached${detailSuffix}${unlockSuffix}: ${message}`);
     }
     throw new AppError(502, `Gmail send failed: ${message}`);
   } catch (err) {

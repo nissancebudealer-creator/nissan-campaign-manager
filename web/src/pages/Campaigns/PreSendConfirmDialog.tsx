@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { campaignsApi } from "../../lib/campaignsApi";
 import { ApiError } from "../../lib/api";
 import type { AudiencePreview, Campaign } from "../../types";
@@ -14,6 +14,22 @@ interface PreSendConfirmDialogProps {
 
 const CHANNEL_LABELS: Record<string, string> = { EMAIL: "Email", WHATSAPP: "WhatsApp", VIBER: "Viber" };
 
+function formatMessageTimestamps(msg: string): string {
+  return msg.replace(/\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)\b/g, (_, iso) => {
+    const withZ = iso.endsWith("Z") ? iso : iso + "Z";
+    const date = new Date(withZ);
+    if (Number.isNaN(date.getTime())) return iso;
+    return (
+      date.toLocaleTimeString("en-US", {
+        timeZone: "Asia/Manila",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      }) + " (PH time)"
+    );
+  });
+}
+
 export function PreSendConfirmDialog({
   open,
   campaign,
@@ -28,6 +44,22 @@ export function PreSendConfirmDialog({
     message: string;
   } | null>(null);
   const [batchSize, setBatchSize] = useState("");
+  const [throttledUntil, setThrottledUntil] = useState<string | null>(null);
+  const [cooldownRemaining, setCooldownRemaining] = useState<number>(0);
+
+  useEffect(() => {
+    if (!throttledUntil) {
+      setCooldownRemaining(0);
+      return;
+    }
+    function updateCooldown() {
+      const diff = Math.ceil((new Date(throttledUntil!).getTime() - Date.now()) / 1000);
+      setCooldownRemaining(diff > 0 ? diff : 0);
+    }
+    updateCooldown();
+    const interval = setInterval(updateCooldown, 1000);
+    return () => clearInterval(interval);
+  }, [throttledUntil]);
 
   if (!open || !campaign) return null;
 
@@ -49,6 +81,15 @@ export function PreSendConfirmDialog({
         // throttledReason is only ever set when the batch stopped early because of a real
         // provider-side limit (daily cap or Gmail's shorter-window rate limit), not a per-
         // recipient failure — surfaced distinctly as a warning so it never masquerades as a normal success.
+        if (response.throttledUntil) {
+          setThrottledUntil(response.throttledUntil);
+        } else if (response.throttledReason) {
+          const isoMatch = response.throttledReason.match(/\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)\b/);
+          if (isoMatch) {
+            setThrottledUntil(isoMatch[1].endsWith("Z") ? isoMatch[1] : isoMatch[1] + "Z");
+          }
+        }
+
         if (response.throttledReason) {
           setResult({
             type: "warning",
@@ -80,6 +121,8 @@ export function PreSendConfirmDialog({
   function handleClose() {
     setResult(null);
     setBatchSize("");
+    setThrottledUntil(null);
+    setCooldownRemaining(0);
     onClose();
   }
 
@@ -154,7 +197,7 @@ export function PreSendConfirmDialog({
                   : "border border-red-200 bg-red-50 text-red-800"
             }`}
           >
-            {result.message}
+            {formatMessageTimestamps(result.message)}
           </div>
         )}
 
@@ -170,6 +213,7 @@ export function PreSendConfirmDialog({
               onClick={handleConfirm}
               disabled={
                 sending ||
+                cooldownRemaining > 0 ||
                 (testMode
                   ? false
                   : isResume
@@ -178,7 +222,13 @@ export function PreSendConfirmDialog({
               }
               className="rounded-md bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
             >
-              {sending ? "Sending…" : isResume ? "Send next batch" : "Confirm and send"}
+              {sending
+                ? "Sending…"
+                : cooldownRemaining > 0
+                  ? `Cooldown (${Math.floor(cooldownRemaining / 60)}m ${cooldownRemaining % 60}s)`
+                  : isResume
+                    ? "Send next batch"
+                    : "Confirm and send"}
             </button>
           )}
         </div>

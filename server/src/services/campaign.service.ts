@@ -505,6 +505,7 @@ export async function requestSend(
   // Set only when a provider throttle (not a per-recipient rejection) stops the batch early — the
   // real reason surfaced to the admin, instead of a bare "0 sent" with no explanation.
   let throttledReason: string | undefined;
+  let throttledUntil: string | undefined;
 
   for (const contact of recipients) {
     const campaignRecipient = await prisma.campaignRecipient.upsert({
@@ -592,6 +593,9 @@ export async function requestSend(
         // up automatically instead of permanently recording a failure that was never theirs.
         const detailMatch = errorMessage.match(/\[(.*?)\]/);
         const detailSuffix = detailMatch ? ` (${detailMatch[1]})` : "";
+        const unlockMatch = errorMessage.match(/\{unlock:(.*?)\}/);
+        throttledUntil = unlockMatch ? unlockMatch[1] : undefined;
+
         throttledReason = isDailyLimitError
           ? `Stopped: today's daily sending limit has been reached. It resets at UTC midnight — try "Send next batch" again after that.`
           : `Stopped: Gmail's short-term rate limit was reached (a separate, shorter-window limit from the daily one)${detailSuffix}. Retrying immediately resets Google's cooldown — please wait before clicking "Send next batch" again.`;
@@ -637,8 +641,8 @@ export async function requestSend(
     action: "CAMPAIGN_SENT",
     entityType: "Campaign",
     entityId: id,
-    metadata: { sentCount, failedCount, remainingCount, throttledReason },
+    metadata: { sentCount, failedCount, remainingCount, throttledReason, throttledUntil },
   });
 
-  return { sentCount, failedCount, remainingCount, throttledReason };
+  return { sentCount, failedCount, remainingCount, throttledReason, throttledUntil };
 }
