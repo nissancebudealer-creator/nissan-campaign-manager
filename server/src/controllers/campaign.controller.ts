@@ -84,3 +84,8 @@ export async function send(req: Request, res: Response) {
   const result = await campaignService.requestSend(req.params.id, req.user!.id, input);
   res.status(200).json(result);
 }
+
+export async function recipientLog(req: Request, res: Response) {
+  const result = await campaignService.getRecipientLog(req.params.id);
+  res.json(result);
+}

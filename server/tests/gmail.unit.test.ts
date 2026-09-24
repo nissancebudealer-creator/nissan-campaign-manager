@@ -72,7 +72,7 @@ describe("unsubscribe tokens", () => {
 });
 
 describe("MIME message builder", () => {
-  it("produces a base64url string that decodes to valid RFC 2822 headers + HTML body", async () => {
+  it("produces a base64url string that decodes to RFC 2822 headers with a base64-encoded HTML body", async () => {
     const { buildMimeMessage } = await import("../src/lib/mime.js");
     const raw = buildMimeMessage({
       from: "Jo Gahiton <jo@example.com>",
@@ -88,7 +88,27 @@ describe("MIME message builder", () => {
     expect(decoded).toContain("From: Jo Gahiton <jo@example.com>");
     expect(decoded).toContain("To: customer@example.com");
     expect(decoded).toContain("Subject: Hi there");
-    expect(decoded).toContain("<p>Hello!</p>");
+    expect(decoded).toContain("Content-Transfer-Encoding: base64");
+
+    // Body is base64-encoded inside the MIME envelope — decode it to verify the HTML
+    const [, bodySection] = decoded.split("\r\n\r\n");
+    const bodyDecoded = Buffer.from(bodySection.replace(/\r\n/g, ""), "base64").toString("utf8");
+    expect(bodyDecoded).toContain("<p>Hello!</p>");
+  });
+
+  it("preserves non-ASCII HTML content (emoji, UTF-8 chars) correctly through the base64 body encoding", async () => {
+    const { buildMimeMessage } = await import("../src/lib/mime.js");
+    const raw = buildMimeMessage({
+      from: "sender@example.com",
+      to: "recipient@example.com",
+      subject: "Test",
+      html: "<p>5% DISCOUNT 🎉 — Nissan Cebu South 📞 032 341 3333</p>",
+    });
+    const decoded = Buffer.from(raw, "base64url").toString("utf8");
+    const [, bodySection] = decoded.split("\r\n\r\n");
+    const bodyDecoded = Buffer.from(bodySection.replace(/\r\n/g, ""), "base64").toString("utf8");
+    expect(bodyDecoded).toContain("5% DISCOUNT 🎉");
+    expect(bodyDecoded).toContain("📞 032 341 3333");
   });
 
   it("RFC 2047 encodes a non-ASCII subject", async () => {

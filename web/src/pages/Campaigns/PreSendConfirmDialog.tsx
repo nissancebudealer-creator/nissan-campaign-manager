@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { campaignsApi } from "../../lib/campaignsApi";
 import { ApiError } from "../../lib/api";
-import type { AudiencePreview, Campaign } from "../../types";
+import type { AudiencePreview, Campaign, RecipientLogEntry } from "../../types";
 
 interface PreSendConfirmDialogProps {
   open: boolean;
@@ -46,6 +46,8 @@ export function PreSendConfirmDialog({
   const [batchSize, setBatchSize] = useState("");
   const [throttledUntil, setThrottledUntil] = useState<string | null>(null);
   const [cooldownRemaining, setCooldownRemaining] = useState<number>(0);
+  const [failedRecipients, setFailedRecipients] = useState<RecipientLogEntry[]>([]);
+  const [showFailureLog, setShowFailureLog] = useState(false);
 
   useEffect(() => {
     if (!throttledUntil) {
@@ -68,6 +70,8 @@ export function PreSendConfirmDialog({
   async function handleConfirm() {
     setSending(true);
     setResult(null);
+    setFailedRecipients([]);
+    setShowFailureLog(false);
     try {
       const parsedBatchSize = batchSize.trim() ? Number(batchSize) : undefined;
       const response = await campaignsApi.send(campaign!.id, testMode, parsedBatchSize);
@@ -98,8 +102,15 @@ export function PreSendConfirmDialog({
         } else if (response.failedCount > 0) {
           setResult({
             type: "warning",
-            message: `Sent ${response.sentCount}, ${response.failedCount} failed — check the campaign's sending log.${remainingNote}`,
+            message: `Sent ${response.sentCount}, ${response.failedCount} failed.${remainingNote}`,
           });
+          // Load the failure details so the admin can see exactly who failed and why
+          try {
+            const log = await campaignsApi.recipientLog(campaign!.id);
+            setFailedRecipients(log.recipients.filter((r) => r.status === "FAILED"));
+          } catch {
+            // Best-effort — failure to load the log doesn't mask the send result
+          }
         } else {
           setResult({
             type: "success",
@@ -123,6 +134,8 @@ export function PreSendConfirmDialog({
     setBatchSize("");
     setThrottledUntil(null);
     setCooldownRemaining(0);
+    setFailedRecipients([]);
+    setShowFailureLog(false);
     onClose();
   }
 
@@ -198,6 +211,41 @@ export function PreSendConfirmDialog({
             }`}
           >
             {formatMessageTimestamps(result.message)}
+          </div>
+        )}
+
+        {failedRecipients.length > 0 && (
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={() => setShowFailureLog((v) => !v)}
+              className="flex items-center gap-1 text-xs font-medium text-red-700 hover:underline"
+            >
+              <span>{showFailureLog ? "▾" : "▸"}</span>
+              {showFailureLog ? "Hide" : "Show"} failed recipients ({failedRecipients.length})
+            </button>
+            {showFailureLog && (
+              <div className="mt-2 max-h-48 overflow-y-auto rounded-md border border-red-200 bg-red-50">
+                <table className="w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-red-100 font-medium text-red-800">
+                    <tr>
+                      <th className="px-2 py-1.5">Contact</th>
+                      <th className="px-2 py-1.5">Address</th>
+                      <th className="px-2 py-1.5">Error</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {failedRecipients.map((r) => (
+                      <tr key={r.id} className="border-t border-red-200">
+                        <td className="px-2 py-1 text-slate-700">{r.contact.name || "—"}</td>
+                        <td className="px-2 py-1 text-slate-500">{r.contact.address || "—"}</td>
+                        <td className="px-2 py-1 text-red-700">{r.errorMessage || "Unknown error"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 

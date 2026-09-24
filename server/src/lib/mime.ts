@@ -24,16 +24,27 @@ export function formatDisplayAddress(name: string, address: string): string {
 
 // Builds a minimal RFC 2822 message and base64url-encodes it, as required by
 // gmail.users.messages.send's `raw` field.
+//
+// The HTML body is encoded as base64 (Content-Transfer-Encoding: base64) so that non-ASCII
+// characters in campaign messages — emoji, accented letters, UTF-8 symbols, etc. — are
+// transmitted safely. 7bit encoding only allows pure ASCII (bytes 0–127) and causes Gmail to
+// reject sends whenever the HTML body contains multibyte characters.
+// The folded base64 body (76 chars/line, CRLF line endings) is standard RFC 2045.
 export function buildMimeMessage(input: MimeMessageInput): string {
+  const bodyBase64 = Buffer.from(input.html, "utf8")
+    .toString("base64")
+    .match(/.{1,76}/g)!
+    .join("\r\n");
+
   const headers = [
     `From: ${input.from}`,
     `To: ${input.to}`,
     `Subject: ${encodeHeaderValue(input.subject)}`,
     "MIME-Version: 1.0",
     'Content-Type: text/html; charset="UTF-8"',
-    "Content-Transfer-Encoding: 7bit",
+    "Content-Transfer-Encoding: base64",
   ];
-  const message = `${headers.join("\r\n")}\r\n\r\n${input.html}`;
+  const message = `${headers.join("\r\n")}\r\n\r\n${bodyBase64}`;
   return Buffer.from(message, "utf8")
     .toString("base64")
     .replace(/\+/g, "-")

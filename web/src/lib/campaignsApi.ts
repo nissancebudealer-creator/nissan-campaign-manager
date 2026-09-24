@@ -1,5 +1,5 @@
 import { api } from "./api";
-import type { AudiencePreview, Campaign, CampaignInput, CampaignStatus, Integration } from "../types";
+import type { AudiencePreview, Campaign, CampaignInput, CampaignStatus, Integration, RecipientLogResponse } from "../types";
 
 export interface CampaignListParams {
   status?: CampaignStatus;
@@ -36,6 +36,7 @@ export const campaignsApi = {
       | { testSentTo: string }
       | { sentCount: number; failedCount: number; remainingCount: number; throttledReason?: string; throttledUntil?: string }
     >(`/campaigns/${id}/send`, { testMode, batchSize }),
+  recipientLog: (id: string) => api.get<RecipientLogResponse>(`/campaigns/${id}/recipients`),
   archive: (id: string) => api.post<{ campaign: Campaign }>(`/campaigns/${id}/archive`),
   unarchive: (id: string) => api.post<{ campaign: Campaign }>(`/campaigns/${id}/unarchive`),
 };

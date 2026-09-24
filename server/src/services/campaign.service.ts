@@ -646,3 +646,47 @@ export async function requestSend(
 
   return { sentCount, failedCount, remainingCount, throttledReason, throttledUntil };
 }
+
+export async function getRecipientLog(campaignId: string) {
+  const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
+  if (!campaign) throw new AppError(404, "Campaign not found");
+
+  const recipients = await prisma.campaignRecipient.findMany({
+    where: { campaignId },
+    include: {
+      contact: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          whatsappNumber: true,
+          viberUserId: true,
+        },
+      },
+    },
+    // FAILED first so errors are immediately visible at the top, then by creation time
+    orderBy: [{ status: "asc" }, { createdAt: "asc" }],
+  });
+
+  return {
+    campaign: { id: campaign.id, name: campaign.name, channel: campaign.channel },
+    recipients: recipients.map((r) => ({
+      id: r.id,
+      status: r.status,
+      errorMessage: r.errorMessage,
+      sentAt: r.sentAt,
+      createdAt: r.createdAt,
+      contact: {
+        id: r.contact.id,
+        name: `${r.contact.firstName} ${r.contact.lastName}`.trim(),
+        address:
+          campaign.channel === "EMAIL"
+            ? r.contact.email
+            : campaign.channel === "WHATSAPP"
+              ? r.contact.whatsappNumber
+              : r.contact.viberUserId,
+      },
+    })),
+  };
+}

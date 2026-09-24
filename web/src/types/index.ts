@@ -374,3 +374,21 @@ export interface SendingLimitRow {
   defaultDailyLimit: number;
   sentToday: number | null;
 }
+
+export interface RecipientLogEntry {
+  id: string;
+  status: "PENDING" | "SENT" | "FAILED" | "OPENED" | "CLICKED" | "BOUNCED";
+  errorMessage: string | null;
+  sentAt: string | null;
+  createdAt: string;
+  contact: {
+    id: string;
+    name: string;
+    address: string | null;
+  };
+}
+
+export interface RecipientLogResponse {
+  campaign: { id: string; name: string; channel: string };
+  recipients: RecipientLogEntry[];
+}

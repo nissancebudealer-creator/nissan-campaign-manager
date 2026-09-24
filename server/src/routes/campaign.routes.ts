@@ -10,6 +10,7 @@ campaignRouter.use(requireAuth);
 campaignRouter.get("/", asyncHandler(campaignController.list));
 campaignRouter.get("/audience-preview", asyncHandler(campaignController.audiencePreview));
 campaignRouter.get("/:id", asyncHandler(campaignController.get));
+campaignRouter.get("/:id/recipients", asyncHandler(campaignController.recipientLog));
 
 campaignRouter.post("/", requirePermission("campaigns:write"), asyncHandler(campaignController.create));
 campaignRouter.put("/:id", requirePermission("campaigns:write"), asyncHandler(campaignController.update));
