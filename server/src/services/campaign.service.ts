@@ -586,8 +586,14 @@ export async function requestSend(
       // must stop the batch the same way the daily limit does, not burn through the rest of the
       // list generating the same guaranteed rejection.
       const isProviderThrottled = isDailyLimitError || lowerErrorMessage.includes("rate limit");
+      // invalid_grant / token expired — the OAuth refresh token was revoked or expired (common when
+      // the Google Cloud app is in "Testing" mode, which limits tokens to 7 days). Every remaining
+      // recipient would fail identically, so stop the batch immediately rather than recording a
+      // failure on each one. The integration has already been flipped to ERROR status by
+      // gmailSend.service.ts so the Integrations page will show a reconnect prompt.
+      const isTokenExpired = lowerErrorMessage.includes("gmail token expired");
 
-      if (isProviderThrottled) {
+      if (isProviderThrottled || isTokenExpired) {
         // Not a real failure for this recipient — nothing was actually attempted against the
         // provider. Leave them PENDING (already upserted above) so the next batch/day picks them
         // up automatically instead of permanently recording a failure that was never theirs.
@@ -596,9 +602,11 @@ export async function requestSend(
         const unlockMatch = errorMessage.match(/\{unlock:(.*?)\}/);
         throttledUntil = unlockMatch ? unlockMatch[1] : undefined;
 
-        throttledReason = isDailyLimitError
-          ? `Stopped: today's daily sending limit has been reached. It resets at UTC midnight — try "Send next batch" again after that.`
-          : `Stopped: Gmail's short-term rate limit was reached (a separate, shorter-window limit from the daily one)${detailSuffix}. Retrying immediately resets Google's cooldown — please wait before clicking "Send next batch" again.`;
+        throttledReason = isTokenExpired
+          ? errorMessage
+          : isDailyLimitError
+            ? `Stopped: today's daily sending limit has been reached. It resets at UTC midnight — try "Send next batch" again after that.`
+            : `Stopped: Gmail's short-term rate limit was reached (a separate, shorter-window limit from the daily one)${detailSuffix}. Retrying immediately resets Google's cooldown — please wait before clicking "Send next batch" again.`;
         break;
       }
 

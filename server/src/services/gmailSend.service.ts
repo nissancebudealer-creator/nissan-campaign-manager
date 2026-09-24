@@ -207,6 +207,23 @@ export async function sendEmailViaGmail(input: SendEmailInput): Promise<{ provid
       const unlockSuffix = detail?.unlockIso ? ` {unlock:${detail.unlockIso}}` : "";
       throw new AppError(429, `Gmail rate limit reached${detailSuffix}${unlockSuffix}: ${message}`);
     }
+    // invalid_grant means Google revoked or expired the OAuth refresh token — most commonly because
+    // the OAuth app is still in "Testing" mode (tokens auto-expire every 7 days), or because the
+    // Gmail account password was changed after the app was connected. Mark the integration ERROR so
+    // the Integrations page shows a reconnect prompt, then throw a clear actionable message instead
+    // of surfacing the raw "invalid_grant" string to every affected recipient row.
+    if (message.includes("invalid_grant")) {
+      await prisma.integration.update({
+        where: { id: integration.id },
+        data: { status: "ERROR" },
+      });
+      throw new AppError(
+        401,
+        "Gmail token expired — go to Integrations and reconnect Gmail to resume sending. " +
+          "(If your OAuth app is in 'Testing' mode in Google Cloud Console, tokens expire every " +
+          "7 days. Publish the app or add your account as a test user to extend them.)",
+      );
+    }
     throw new AppError(502, `Gmail send failed: ${message}`);
   } catch (err) {
     await releaseSendSlot(integration.id);
