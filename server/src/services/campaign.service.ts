@@ -400,6 +400,7 @@ function sleep(ms: number) {
 }
 
 const SENDABLE_STATUSES: CampaignStatus[] = ["DRAFT", "SCHEDULED", "SENDING", "PAUSED"];
+const activeSends = new Set<string>();
 
 export async function requestSend(
   id: string,
@@ -427,6 +428,32 @@ export async function requestSend(
         `this platform never simulates a send or fabricates delivery data.`,
     );
   }
+
+  if (!options.testMode) {
+    if (activeSends.has(id)) {
+      throw new AppError(
+        409,
+        "A batch is currently being sent for this campaign in the background. Please wait a moment for it to complete.",
+      );
+    }
+    activeSends.add(id);
+  }
+
+  try {
+    return await executeSend(existing, actorId, options);
+  } finally {
+    if (!options.testMode) {
+      activeSends.delete(id);
+    }
+  }
+}
+
+async function executeSend(
+  existing: Awaited<ReturnType<typeof prisma.campaign.findUniqueOrThrow>>,
+  actorId: string,
+  options: { testMode: boolean; batchSize?: number },
+) {
+  const id = existing.id;
 
   if (options.testMode) {
     if (existing.channel !== "EMAIL") {
@@ -490,8 +517,15 @@ export async function requestSend(
         "deliverable address for this channel (e.g. not yet subscribed on Viber).",
     );
   }
-  const recipients =
-    options.batchSize && options.batchSize > 0 ? eligibleRecipients.slice(0, options.batchSize) : eligibleRecipients;
+  // For EMAIL, each message has a 2500ms delay + Gmail roundtrip (~3.2s). Standard web proxies
+  // (Vercel, Render) enforce a 60s timeout, so a synchronous batch must not exceed 15 recipients
+  // (~48s) to avoid 504 Gateway Timeout or dropped connections.
+  const DEFAULT_BATCH_SIZE = existing.channel === "EMAIL" ? 15 : 50;
+  const MAX_BATCH_SIZE = existing.channel === "EMAIL" ? 15 : 50;
+  const requestedBatchSize =
+    options.batchSize && options.batchSize > 0 ? options.batchSize : DEFAULT_BATCH_SIZE;
+  const effectiveBatchSize = Math.min(requestedBatchSize, MAX_BATCH_SIZE);
+  const recipients = eligibleRecipients.slice(0, effectiveBatchSize);
 
   await prisma.campaign.update({ where: { id }, data: { status: "SENDING" } });
 
