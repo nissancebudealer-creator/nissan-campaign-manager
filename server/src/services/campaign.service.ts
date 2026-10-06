@@ -1,4 +1,4 @@
-import type { CampaignStatus, Channel, Prisma } from "@prisma/client";
+import type { CampaignStatus, Channel, Prisma, RecipientStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
 import { recordAudit } from "./audit.service.js";
@@ -79,12 +79,33 @@ export async function archiveCampaign(id: string, actorId: string, archived: boo
   return campaign;
 }
 
+// Statuses that represent a completed send attempt that must never be re-sent to.
+// Contacts who opened, clicked, bounced, or failed have already been processed; only contacts with no
+// record or left PENDING (e.g. cut short by rate limit) are eligible for subsequent batches.
+const ATTEMPTED_RECIPIENT_STATUSES: RecipientStatus[] = [
+  "SENT",
+  "DELIVERED",
+  "FAILED",
+  "OPENED",
+  "CLICKED",
+  "BOUNCED",
+  "UNSUBSCRIBED",
+  "SUPPRESSED",
+];
+
+// All statuses that represent a message that was accepted and sent by the provider.
+const SUCCESSFUL_SENT_STATUSES: RecipientStatus[] = [
+  "SENT",
+  "DELIVERED",
+  "OPENED",
+  "CLICKED",
+  "BOUNCED",
+];
+
 // Everyone this campaign's segment/channel would still reach that it hasn't already sent to —
 // shared by requestSend (what to actually attempt) and getCampaign (what to show as "remaining"
 // in the UI, so an admin closing and reopening the page still sees accurate batch progress).
-// A FAILED recipient is a real, completed attempt (the provider genuinely rejected it) — not
-// silently retried by a later "send"/"send next batch" call, only PENDING (never got a real
-// provider response, e.g. cut short by a daily-limit break) or never-attempted contacts are.
+// A contact that already has an attempted status must not be silently re-sent to.
 async function buildUnsentRecipientsWhere(campaign: {
   id: string;
   segmentId: string | null;
@@ -96,7 +117,7 @@ async function buildUnsentRecipientsWhere(campaign: {
       buildRulesWhere(rulesSchema.parse(segment.rulesJson)),
       deliverableWhere(campaign.channel),
       channelAddressWhere(campaign.channel),
-      { campaignRecipients: { none: { campaignId: campaign.id, status: { in: ["SENT", "FAILED"] } } } },
+      { campaignRecipients: { none: { campaignId: campaign.id, status: { in: ATTEMPTED_RECIPIENT_STATUSES } } } },
     ],
   };
 }
@@ -105,7 +126,9 @@ export async function getCampaign(id: string) {
   const campaign = await prisma.campaign.findUnique({ where: { id }, include: campaignInclude });
   if (!campaign) throw new AppError(404, "Campaign not found");
 
-  const sentCount = await prisma.campaignRecipient.count({ where: { campaignId: id, status: "SENT" } });
+  const sentCount = await prisma.campaignRecipient.count({
+    where: { campaignId: id, status: { in: SUCCESSFUL_SENT_STATUSES } },
+  });
   // Only meaningful once a real send has started — cheap to skip for DRAFT/SCHEDULED/etc, and
   // trivially 0 once terminal (SENT/CANCELLED/FAILED never leave anything queued).
   const remainingCount =
@@ -400,7 +423,6 @@ function sleep(ms: number) {
 }
 
 const SENDABLE_STATUSES: CampaignStatus[] = ["DRAFT", "SCHEDULED", "SENDING", "PAUSED"];
-const activeSends = new Set<string>();
 
 export async function requestSend(
   id: string,
@@ -428,32 +450,6 @@ export async function requestSend(
         `this platform never simulates a send or fabricates delivery data.`,
     );
   }
-
-  if (!options.testMode) {
-    if (activeSends.has(id)) {
-      throw new AppError(
-        409,
-        "A batch is currently being sent for this campaign in the background. Please wait a moment for it to complete.",
-      );
-    }
-    activeSends.add(id);
-  }
-
-  try {
-    return await executeSend(existing, actorId, options);
-  } finally {
-    if (!options.testMode) {
-      activeSends.delete(id);
-    }
-  }
-}
-
-async function executeSend(
-  existing: Awaited<ReturnType<typeof prisma.campaign.findUniqueOrThrow>>,
-  actorId: string,
-  options: { testMode: boolean; batchSize?: number },
-) {
-  const id = existing.id;
 
   if (options.testMode) {
     if (existing.channel !== "EMAIL") {
@@ -517,15 +513,8 @@ async function executeSend(
         "deliverable address for this channel (e.g. not yet subscribed on Viber).",
     );
   }
-  // For EMAIL, each message has a 2500ms delay + Gmail roundtrip (~3.2s). Standard web proxies
-  // (Vercel, Render) enforce a 60s timeout, so a synchronous batch must not exceed 15 recipients
-  // (~48s) to avoid 504 Gateway Timeout or dropped connections.
-  const DEFAULT_BATCH_SIZE = existing.channel === "EMAIL" ? 15 : 50;
-  const MAX_BATCH_SIZE = existing.channel === "EMAIL" ? 15 : 50;
-  const requestedBatchSize =
-    options.batchSize && options.batchSize > 0 ? options.batchSize : DEFAULT_BATCH_SIZE;
-  const effectiveBatchSize = Math.min(requestedBatchSize, MAX_BATCH_SIZE);
-  const recipients = eligibleRecipients.slice(0, effectiveBatchSize);
+  const recipients =
+    options.batchSize && options.batchSize > 0 ? eligibleRecipients.slice(0, options.batchSize) : eligibleRecipients;
 
   await prisma.campaign.update({ where: { id }, data: { status: "SENDING" } });
 
@@ -671,7 +660,9 @@ async function executeSend(
   // Cumulative across every batch this campaign has ever run, not just this call — a later batch
   // finishing off a large audience must still resolve to SENT if earlier batches already
   // succeeded, even if this particular call's own sentCount is 0.
-  const totalSentSoFar = await prisma.campaignRecipient.count({ where: { campaignId: id, status: "SENT" } });
+  const totalSentSoFar = await prisma.campaignRecipient.count({
+    where: { campaignId: id, status: { in: SUCCESSFUL_SENT_STATUSES } },
+  });
   const finalStatus: CampaignStatus = remainingCount > 0 ? "SENDING" : totalSentSoFar > 0 ? "SENT" : "FAILED";
 
   await prisma.campaign.update({

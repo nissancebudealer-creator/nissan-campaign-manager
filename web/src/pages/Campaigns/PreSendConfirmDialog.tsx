@@ -43,7 +43,7 @@ export function PreSendConfirmDialog({
     type: "success" | "warning" | "error";
     message: string;
   } | null>(null);
-  const [batchSize, setBatchSize] = useState("15");
+  const [batchSize, setBatchSize] = useState("");
   const [throttledUntil, setThrottledUntil] = useState<string | null>(null);
   const [cooldownRemaining, setCooldownRemaining] = useState<number>(0);
   const [failedRecipients, setFailedRecipients] = useState<RecipientLogEntry[]>([]);
@@ -120,47 +120,9 @@ export function PreSendConfirmDialog({
         onSent?.();
       }
     } catch (err) {
-      // Check if messages actually went through (e.g. if HTTP connection timed out while server finished sending)
-      try {
-        const updated = await campaignsApi.get(campaign!.id);
-        const prevSent = campaign?.sentCount ?? 0;
-        if (
-          typeof updated.campaign.sentCount === "number" &&
-          (updated.campaign.sentCount ?? 0) > prevSent
-        ) {
-          const newlySent = (updated.campaign.sentCount ?? 0) - prevSent;
-          const remainingNote =
-            (updated.campaign.remainingCount ?? 0) > 0
-              ? ` ${updated.campaign.remainingCount} recipient${(updated.campaign.remainingCount ?? 0) === 1 ? "" : "s"} still to go — click "Send next batch" to continue.`
-              : " Everyone eligible has now been sent to.";
-          setResult({
-            type: "success",
-            message: `Batch completed! Sent ${newlySent} message${newlySent === 1 ? "" : "s"}.${remainingNote}`,
-          });
-          onSent?.();
-          return;
-        }
-      } catch {
-        // ignore fallback check error
-      }
-
-      const isNetworkTimeout =
-        err instanceof Error &&
-        (err.name === "AbortError" ||
-          err.message.toLowerCase().includes("fetch") ||
-          err.message.toLowerCase().includes("timeout") ||
-          err.message.toLowerCase().includes("network") ||
-          err.message.toLowerCase().includes("gateway"));
-
       setResult({
-        type: isNetworkTimeout ? "warning" : "error",
-        message: isNetworkTimeout
-          ? "The request timed out waiting for the server, but the batch may still be finishing in the background. Please refresh in a moment to check your updated sent count."
-          : err instanceof ApiError
-            ? err.message
-            : err instanceof Error
-              ? err.message
-              : "Could not send this campaign.",
+        type: "error",
+        message: err instanceof ApiError ? err.message : "Could not send this campaign.",
       });
     } finally {
       setSending(false);
@@ -169,7 +131,7 @@ export function PreSendConfirmDialog({
 
   function handleClose() {
     setResult(null);
-    setBatchSize("15");
+    setBatchSize("");
     setThrottledUntil(null);
     setCooldownRemaining(0);
     setFailedRecipients([]);
@@ -221,19 +183,19 @@ export function PreSendConfirmDialog({
         {!testMode && (
           <label className="mt-4 block">
             <span className="text-xs font-medium text-slate-500">
-              Batch size (max 15 per batch)
+              Batch size (optional — leave blank to send to everyone eligible right now)
             </span>
             <input
               type="number"
               min={1}
-              max={15}
-              placeholder="15"
+              placeholder="e.g. 25 or 50"
               value={batchSize}
               onChange={(e) => setBatchSize(e.target.value)}
               className="input mt-1"
             />
             <span className="mt-1 block text-xs text-slate-400">
-              Sends up to 15 recipients per batch (~45s) to stay safely within web request timeouts and avoid Gmail rate limits. Click "Send next batch" afterward to continue.
+              Sends only this many, then stops — recommended 25–50 for Gmail to avoid provider rate limits.
+              Click "Send next batch" afterward to continue.
             </span>
           </label>
         )}
