@@ -119,6 +119,18 @@ export function ReportRecipientsModal({
     loadRecipients();
   }, [campaignId, open, activeCategory, search, page]);
 
+  // Handle Escape key to close modal
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !editFormOpen) {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, editFormOpen, onClose]);
+
   if (!open || !campaignId) return null;
 
   function showToast(msg: string) {
@@ -128,8 +140,14 @@ export function ReportRecipientsModal({
 
   function handleCopy(text: string, label: string) {
     if (!text) return;
-    navigator.clipboard.writeText(text);
-    showToast(`Copied ${label} to clipboard!`);
+    try {
+      if (navigator?.clipboard?.writeText) {
+        navigator.clipboard.writeText(text);
+      }
+      showToast(`Copied ${label} to clipboard!`);
+    } catch {
+      showToast(`Unable to copy ${label}.`);
+    }
   }
 
   async function handleOpenEdit(contactId: string) {
@@ -213,7 +231,12 @@ export function ReportRecipientsModal({
 
   return (
     <>
-      <div className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-slate-900/50 p-3 sm:p-6 backdrop-blur-xs">
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/50 p-3 sm:p-6 backdrop-blur-xs"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
         <div className="relative flex max-h-[92vh] w-full max-w-6xl flex-col rounded-2xl bg-white shadow-2xl ring-1 ring-slate-900/10">
           {/* Header */}
           <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-6 py-4.5 bg-slate-50/75 rounded-t-2xl">

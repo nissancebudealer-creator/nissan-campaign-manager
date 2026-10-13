@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import clsx from "clsx";
 import { analyticsApi } from "../../lib/analyticsApi";
 import { CAMPAIGN_STATUS_STYLES } from "../../lib/constants";
 import type { CampaignReportEntry } from "../../types";
@@ -169,106 +170,196 @@ export function Reports() {
                     </span>
                   </td>
                   {/* Clickable Recipients */}
-                  <td className="px-4 py-2.5">
+                  <td
+                    className="px-4 py-2.5 cursor-pointer hover:bg-slate-100/60"
+                    onClick={() => openRecipients(campaign, "ALL")}
+                  >
                     <button
                       type="button"
-                      onClick={() => openRecipients(campaign, "ALL")}
-                      className="font-semibold text-slate-700 hover:text-blue-600 hover:underline cursor-pointer"
-                      title="View all recipients"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openRecipients(campaign, "ALL");
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-slate-50 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 px-2.5 py-1 text-xs font-semibold text-slate-800 shadow-2xs transition-colors cursor-pointer"
+                      title="Click to view all recipient contacts"
                     >
-                      {metrics.recipients}
+                      <span>{metrics.recipients}</span>
+                      <span className="text-[10px] text-slate-400">↗</span>
                     </button>
                   </td>
+
                   {/* Clickable Sent */}
-                  <td className="px-4 py-2.5">
+                  <td
+                    className="px-4 py-2.5 cursor-pointer hover:bg-slate-100/60"
+                    onClick={() => openRecipients(campaign, "SENT")}
+                  >
                     <button
                       type="button"
-                      onClick={() => openRecipients(campaign, "SENT")}
-                      className="font-semibold text-slate-700 hover:text-blue-600 hover:underline cursor-pointer"
-                      title="View sent contacts"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openRecipients(campaign, "SENT");
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md border border-sky-200 bg-sky-50/70 hover:bg-sky-100 hover:border-sky-300 text-sky-800 px-2.5 py-1 text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+                      title="Click to view sent contacts"
                     >
-                      {metrics.sent}
+                      <span>{metrics.sent}</span>
+                      <span className="text-[10px] text-sky-500">↗</span>
                     </button>
                   </td>
+
                   {/* Clickable Failed */}
-                  <td className="px-4 py-2.5">
+                  <td
+                    className="px-4 py-2.5 cursor-pointer hover:bg-slate-100/60"
+                    onClick={() => openRecipients(campaign, "FAILED")}
+                  >
                     <button
                       type="button"
-                      onClick={() => openRecipients(campaign, "FAILED")}
-                      className={`font-semibold cursor-pointer hover:underline ${
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openRecipients(campaign, "FAILED");
+                      }}
+                      className={clsx(
+                        "inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-semibold shadow-2xs transition-colors cursor-pointer",
                         metrics.failed > 0
-                          ? "text-red-600 hover:text-red-700"
-                          : "text-slate-400 hover:text-slate-600"
-                      }`}
-                      title="View failed contacts & error diagnostics"
+                          ? "border-red-300 bg-red-50 text-red-700 hover:bg-red-100 font-bold"
+                          : "border-slate-200 bg-slate-50 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                      )}
+                      title="Click to view failed contacts & error diagnostics"
                     >
-                      {metrics.failed}
+                      <span>{metrics.failed}</span>
+                      <span className={metrics.failed > 0 ? "text-[10px] text-red-500" : "text-[10px] text-slate-300"}>↗</span>
                     </button>
                   </td>
+
                   {/* Clickable Bounced */}
-                  <td className="px-4 py-2.5">
+                  <td
+                    className="px-4 py-2.5 cursor-pointer hover:bg-slate-100/60"
+                    onClick={() => openRecipients(campaign, "BOUNCED")}
+                  >
                     <button
                       type="button"
-                      onClick={() => openRecipients(campaign, "BOUNCED")}
-                      className={`font-semibold cursor-pointer hover:underline ${
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openRecipients(campaign, "BOUNCED");
+                      }}
+                      className={clsx(
+                        "inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-semibold shadow-2xs transition-colors cursor-pointer",
                         metrics.bounced > 0
-                          ? "text-amber-600 hover:text-amber-700"
-                          : "text-slate-400 hover:text-slate-600"
-                      }`}
-                      title="View bounced contacts"
+                          ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 font-bold"
+                          : "border-slate-200 bg-slate-50 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                      )}
+                      title="Click to view bounced contacts"
                     >
-                      {metrics.bounced}
+                      <span>{metrics.bounced}</span>
+                      <span className={metrics.bounced > 0 ? "text-[10px] text-amber-500" : "text-[10px] text-slate-300"}>↗</span>
                     </button>
                   </td>
+
                   {/* Clickable Opened */}
-                  <td className="px-4 py-2.5">
+                  <td
+                    className="px-4 py-2.5 cursor-pointer hover:bg-slate-100/60"
+                    onClick={() => openRecipients(campaign, "OPENED")}
+                  >
                     <button
                       type="button"
-                      onClick={() => openRecipients(campaign, "OPENED")}
-                      className={`font-semibold cursor-pointer hover:underline ${
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openRecipients(campaign, "OPENED");
+                      }}
+                      className={clsx(
+                        "inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-semibold shadow-2xs transition-colors cursor-pointer",
                         metrics.opened > 0
-                          ? "text-emerald-700 hover:text-emerald-800"
-                          : "text-slate-500 hover:text-slate-700"
-                      }`}
-                      title="View opened contacts"
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 font-bold"
+                          : "border-slate-200 bg-slate-50 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                      )}
+                      title="Click to view opened contacts"
                     >
-                      {metrics.opened}
+                      <span>{metrics.opened}</span>
+                      <span className={metrics.opened > 0 ? "text-[10px] text-emerald-500" : "text-[10px] text-slate-300"}>↗</span>
                     </button>
                   </td>
+
                   {/* Clickable Clicked */}
-                  <td className="px-4 py-2.5">
+                  <td
+                    className="px-4 py-2.5 cursor-pointer hover:bg-slate-100/60"
+                    onClick={() => openRecipients(campaign, "CLICKED")}
+                  >
                     <button
                       type="button"
-                      onClick={() => openRecipients(campaign, "CLICKED")}
-                      className={`font-semibold cursor-pointer hover:underline ${
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openRecipients(campaign, "CLICKED");
+                      }}
+                      className={clsx(
+                        "inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-semibold shadow-2xs transition-colors cursor-pointer",
                         metrics.clicked > 0
-                          ? "text-blue-600 hover:text-blue-700"
-                          : "text-slate-500 hover:text-slate-700"
-                      }`}
-                      title="View clicked contacts"
+                          ? "border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100 font-bold"
+                          : "border-slate-200 bg-slate-50 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                      )}
+                      title="Click to view clicked contacts"
                     >
-                      {metrics.clicked}
+                      <span>{metrics.clicked}</span>
+                      <span className={metrics.clicked > 0 ? "text-[10px] text-blue-500" : "text-[10px] text-slate-300"}>↗</span>
                     </button>
                   </td>
-                  <td className="px-4 py-2.5 font-medium text-slate-900">
-                    {formatPercent(metrics.openRate)}
-                  </td>
-                  <td className="px-4 py-2.5 font-medium text-slate-900">
-                    {formatPercent(metrics.clickRate)}
-                  </td>
-                  {/* Clickable Unsubscribed */}
-                  <td className="px-4 py-2.5">
+
+                  {/* Clickable Open Rate -> opens OPENED */}
+                  <td
+                    className="px-4 py-2.5 cursor-pointer hover:bg-slate-100/60"
+                    onClick={() => openRecipients(campaign, "OPENED")}
+                  >
                     <button
                       type="button"
-                      onClick={() => openRecipients(campaign, "UNSUBSCRIBED")}
-                      className={`font-semibold cursor-pointer hover:underline ${
-                        metrics.unsubscribed > 0
-                          ? "text-amber-600 hover:text-amber-700"
-                          : "text-slate-400 hover:text-slate-600"
-                      }`}
-                      title="View unsubscribed contacts"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openRecipients(campaign, "OPENED");
+                      }}
+                      className="font-medium text-slate-800 hover:text-emerald-700 hover:underline cursor-pointer"
+                      title="Click to view opened contacts"
                     >
-                      {metrics.unsubscribed}
+                      {formatPercent(metrics.openRate)}
+                    </button>
+                  </td>
+
+                  {/* Clickable Click Rate -> opens CLICKED */}
+                  <td
+                    className="px-4 py-2.5 cursor-pointer hover:bg-slate-100/60"
+                    onClick={() => openRecipients(campaign, "CLICKED")}
+                  >
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openRecipients(campaign, "CLICKED");
+                      }}
+                      className="font-medium text-slate-800 hover:text-blue-700 hover:underline cursor-pointer"
+                      title="Click to view clicked contacts"
+                    >
+                      {formatPercent(metrics.clickRate)}
+                    </button>
+                  </td>
+
+                  {/* Clickable Unsubscribed */}
+                  <td
+                    className="px-4 py-2.5 cursor-pointer hover:bg-slate-100/60"
+                    onClick={() => openRecipients(campaign, "UNSUBSCRIBED")}
+                  >
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openRecipients(campaign, "UNSUBSCRIBED");
+                      }}
+                      className={clsx(
+                        "inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-semibold shadow-2xs transition-colors cursor-pointer",
+                        metrics.unsubscribed > 0
+                          ? "border-purple-300 bg-purple-50 text-purple-800 hover:bg-purple-100 font-bold"
+                          : "border-slate-200 bg-slate-50 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                      )}
+                      title="Click to view unsubscribed contacts"
+                    >
+                      <span>{metrics.unsubscribed}</span>
+                      <span className={metrics.unsubscribed > 0 ? "text-[10px] text-purple-500" : "text-[10px] text-slate-300"}>↗</span>
                     </button>
                   </td>
                 </tr>
