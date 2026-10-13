@@ -16,6 +16,13 @@ function toQueryString(params: object) {
   return qs ? `?${qs}` : "";
 }
 
+export interface RecipientLogParams {
+  status?: string;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
 export const campaignsApi = {
   list: (params: CampaignListParams = {}) =>
     api.get<{ campaigns: Campaign[] }>(`/campaigns${toQueryString(params)}`),
@@ -36,7 +43,8 @@ export const campaignsApi = {
       | { testSentTo: string }
       | { sentCount: number; failedCount: number; remainingCount: number; throttledReason?: string; throttledUntil?: string }
     >(`/campaigns/${id}/send`, { testMode, batchSize }),
-  recipientLog: (id: string) => api.get<RecipientLogResponse>(`/campaigns/${id}/recipients`),
+  recipientLog: (id: string, params: RecipientLogParams = {}) =>
+    api.get<RecipientLogResponse>(`/campaigns/${id}/recipients${toQueryString(params)}`),
   archive: (id: string) => api.post<{ campaign: Campaign }>(`/campaigns/${id}/archive`),
   unarchive: (id: string) => api.post<{ campaign: Campaign }>(`/campaigns/${id}/unarchive`),
 };

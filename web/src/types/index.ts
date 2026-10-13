@@ -375,20 +375,52 @@ export interface SendingLimitRow {
   sentToday: number | null;
 }
 
+export interface RecipientCategoryCounts {
+  recipients: number;
+  sent: number;
+  failed: number;
+  bounced: number;
+  opened: number;
+  clicked: number;
+  unsubscribed: number;
+}
+
 export interface RecipientLogEntry {
   id: string;
   status: "PENDING" | "SENT" | "FAILED" | "OPENED" | "CLICKED" | "BOUNCED";
   errorMessage: string | null;
   sentAt: string | null;
+  openedAt?: string | null;
+  clickedAt?: string | null;
   createdAt: string;
+  isUnsubscribed?: boolean;
+  unsubscribeReason?: string | null;
   contact: {
     id: string;
     name: string;
     address: string | null;
+    firstName?: string;
+    lastName?: string;
+    email?: string | null;
+    mobileNumber?: string | null;
+    whatsappNumber?: string | null;
+    viberNumber?: string | null;
+    viberUserId?: string | null;
+    company?: string | null;
+    customerType?: string | null;
+    productInterest?: string | null;
+    location?: string | null;
+    leadStatus?: string | null;
+    leadSource?: string | null;
+    notes?: string | null;
   };
 }
 
 export interface RecipientLogResponse {
   campaign: { id: string; name: string; channel: string };
+  total?: number;
+  counts?: RecipientCategoryCounts;
+  page?: number;
+  pageSize?: number;
   recipients: RecipientLogEntry[];
 }

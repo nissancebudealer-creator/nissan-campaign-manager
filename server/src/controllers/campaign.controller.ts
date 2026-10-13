@@ -86,6 +86,11 @@ export async function send(req: Request, res: Response) {
 }
 
 export async function recipientLog(req: Request, res: Response) {
-  const result = await campaignService.getRecipientLog(req.params.id);
+  const result = await campaignService.getRecipientLog(req.params.id, {
+    status: req.query.status as string | undefined,
+    search: req.query.search as string | undefined,
+    page: req.query.page ? Number(req.query.page) : undefined,
+    pageSize: req.query.pageSize ? Number(req.query.pageSize) : undefined,
+  });
   res.json(result);
 }

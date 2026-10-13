@@ -1,4 +1,4 @@
-import type { CampaignStatus, Channel, Prisma, RecipientStatus } from "@prisma/client";
+import type { CampaignStatus, Channel, Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
 import { recordAudit } from "./audit.service.js";
@@ -79,33 +79,12 @@ export async function archiveCampaign(id: string, actorId: string, archived: boo
   return campaign;
 }
 
-// Statuses that represent a completed send attempt that must never be re-sent to.
-// Contacts who opened, clicked, bounced, or failed have already been processed; only contacts with no
-// record or left PENDING (e.g. cut short by rate limit) are eligible for subsequent batches.
-const ATTEMPTED_RECIPIENT_STATUSES: RecipientStatus[] = [
-  "SENT",
-  "DELIVERED",
-  "FAILED",
-  "OPENED",
-  "CLICKED",
-  "BOUNCED",
-  "UNSUBSCRIBED",
-  "SUPPRESSED",
-];
-
-// All statuses that represent a message that was accepted and sent by the provider.
-const SUCCESSFUL_SENT_STATUSES: RecipientStatus[] = [
-  "SENT",
-  "DELIVERED",
-  "OPENED",
-  "CLICKED",
-  "BOUNCED",
-];
-
 // Everyone this campaign's segment/channel would still reach that it hasn't already sent to —
 // shared by requestSend (what to actually attempt) and getCampaign (what to show as "remaining"
 // in the UI, so an admin closing and reopening the page still sees accurate batch progress).
-// A contact that already has an attempted status must not be silently re-sent to.
+// A FAILED recipient is a real, completed attempt (the provider genuinely rejected it) — not
+// silently retried by a later "send"/"send next batch" call, only PENDING (never got a real
+// provider response, e.g. cut short by a daily-limit break) or never-attempted contacts are.
 async function buildUnsentRecipientsWhere(campaign: {
   id: string;
   segmentId: string | null;
@@ -117,7 +96,7 @@ async function buildUnsentRecipientsWhere(campaign: {
       buildRulesWhere(rulesSchema.parse(segment.rulesJson)),
       deliverableWhere(campaign.channel),
       channelAddressWhere(campaign.channel),
-      { campaignRecipients: { none: { campaignId: campaign.id, status: { in: ATTEMPTED_RECIPIENT_STATUSES } } } },
+      { campaignRecipients: { none: { campaignId: campaign.id, status: { in: ["SENT", "FAILED"] } } } },
     ],
   };
 }
@@ -126,9 +105,7 @@ export async function getCampaign(id: string) {
   const campaign = await prisma.campaign.findUnique({ where: { id }, include: campaignInclude });
   if (!campaign) throw new AppError(404, "Campaign not found");
 
-  const sentCount = await prisma.campaignRecipient.count({
-    where: { campaignId: id, status: { in: SUCCESSFUL_SENT_STATUSES } },
-  });
+  const sentCount = await prisma.campaignRecipient.count({ where: { campaignId: id, status: "SENT" } });
   // Only meaningful once a real send has started — cheap to skip for DRAFT/SCHEDULED/etc, and
   // trivially 0 once terminal (SENT/CANCELLED/FAILED never leave anything queued).
   const remainingCount =
@@ -660,9 +637,7 @@ export async function requestSend(
   // Cumulative across every batch this campaign has ever run, not just this call — a later batch
   // finishing off a large audience must still resolve to SENT if earlier batches already
   // succeeded, even if this particular call's own sentCount is 0.
-  const totalSentSoFar = await prisma.campaignRecipient.count({
-    where: { campaignId: id, status: { in: SUCCESSFUL_SENT_STATUSES } },
-  });
+  const totalSentSoFar = await prisma.campaignRecipient.count({ where: { campaignId: id, status: "SENT" } });
   const finalStatus: CampaignStatus = remainingCount > 0 ? "SENDING" : totalSentSoFar > 0 ? "SENT" : "FAILED";
 
   await prisma.campaign.update({
@@ -680,39 +655,147 @@ export async function requestSend(
   return { sentCount, failedCount, remainingCount, throttledReason, throttledUntil };
 }
 
-export async function getRecipientLog(campaignId: string) {
+export interface RecipientLogParams {
+  status?: string;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export async function getRecipientLog(campaignId: string, params: RecipientLogParams = {}) {
   const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
   if (!campaign) throw new AppError(404, "Campaign not found");
 
-  const recipients = await prisma.campaignRecipient.findMany({
-    where: { campaignId },
-    include: {
-      contact: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          email: true,
-          whatsappNumber: true,
-          viberUserId: true,
+  const normalizedStatus = params.status?.toUpperCase();
+  let statusCondition: object = {};
+
+  if (normalizedStatus === "FAILED") {
+    statusCondition = { status: "FAILED" };
+  } else if (normalizedStatus === "BOUNCED") {
+    statusCondition = { status: "BOUNCED" };
+  } else if (normalizedStatus === "CLICKED") {
+    statusCondition = { OR: [{ status: "CLICKED" }, { clickedAt: { not: null } }] };
+  } else if (normalizedStatus === "OPENED") {
+    statusCondition = { OR: [{ status: { in: ["OPENED", "CLICKED"] } }, { openedAt: { not: null } }] };
+  } else if (normalizedStatus === "SENT") {
+    statusCondition = { status: { in: ["SENT", "OPENED", "CLICKED", "BOUNCED"] } };
+  } else if (normalizedStatus === "UNSUBSCRIBED") {
+    statusCondition = { contact: { suppressions: { some: { channel: campaign.channel } } } };
+  }
+
+  const searchTrimmed = params.search?.trim();
+  const searchCondition = searchTrimmed
+    ? {
+        contact: {
+          OR: [
+            { firstName: { contains: searchTrimmed, mode: "insensitive" as const } },
+            { lastName: { contains: searchTrimmed, mode: "insensitive" as const } },
+            { email: { contains: searchTrimmed, mode: "insensitive" as const } },
+            { mobileNumber: { contains: searchTrimmed, mode: "insensitive" as const } },
+            { whatsappNumber: { contains: searchTrimmed, mode: "insensitive" as const } },
+            { viberNumber: { contains: searchTrimmed, mode: "insensitive" as const } },
+            { company: { contains: searchTrimmed, mode: "insensitive" as const } },
+            { location: { contains: searchTrimmed, mode: "insensitive" as const } },
+          ],
+        },
+      }
+    : {};
+
+  const where = {
+    campaignId,
+    ...statusCondition,
+    ...searchCondition,
+  };
+
+  const page = params.page && params.page > 0 ? Number(params.page) : 1;
+  const pageSize =
+    params.pageSize && params.pageSize > 0
+      ? Number(params.pageSize)
+      : params.page
+        ? 50
+        : undefined;
+  const skip = pageSize ? (page - 1) * pageSize : undefined;
+  const take = pageSize;
+
+  const [total, recipients, statusGroups, unsubscribedCount, campaignRecipientsTotal] = await Promise.all([
+    prisma.campaignRecipient.count({ where }),
+    prisma.campaignRecipient.findMany({
+      where,
+      skip,
+      take,
+      include: {
+        contact: {
+          include: {
+            suppressions: {
+              where: { channel: campaign.channel },
+              select: { channel: true, reason: true, addedAt: true },
+            },
+          },
         },
       },
-    },
-    // FAILED first so errors are immediately visible at the top, then by creation time
-    orderBy: [{ status: "asc" }, { createdAt: "asc" }],
-  });
+      // FAILED first so errors are immediately visible at the top, then by creation/update time
+      orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+    }),
+    prisma.campaignRecipient.groupBy({
+      by: ["status"],
+      where: { campaignId },
+      _count: { _all: true },
+    }),
+    prisma.campaignRecipient.count({
+      where: { campaignId, contact: { suppressions: { some: { channel: campaign.channel } } } },
+    }),
+    prisma.campaignRecipient.count({ where: { campaignId } }),
+  ]);
+
+  const byStatus: Record<string, number> = {};
+  for (const row of statusGroups) {
+    byStatus[row.status] = row._count._all;
+  }
+  const sentCount = (byStatus.SENT ?? 0) + (byStatus.OPENED ?? 0) + (byStatus.CLICKED ?? 0) + (byStatus.BOUNCED ?? 0);
+  const openedCount = (byStatus.OPENED ?? 0) + (byStatus.CLICKED ?? 0);
+  const counts = {
+    recipients: campaignRecipientsTotal,
+    sent: sentCount,
+    failed: byStatus.FAILED ?? 0,
+    bounced: byStatus.BOUNCED ?? 0,
+    opened: openedCount,
+    clicked: byStatus.CLICKED ?? 0,
+    unsubscribed: unsubscribedCount,
+  };
 
   return {
     campaign: { id: campaign.id, name: campaign.name, channel: campaign.channel },
+    total,
+    counts,
+    page: pageSize ? page : 1,
+    pageSize: pageSize ?? total,
     recipients: recipients.map((r) => ({
       id: r.id,
       status: r.status,
       errorMessage: r.errorMessage,
       sentAt: r.sentAt,
+      openedAt: r.openedAt,
+      clickedAt: r.clickedAt,
       createdAt: r.createdAt,
+      isUnsubscribed: r.contact.suppressions.length > 0,
+      unsubscribeReason: r.contact.suppressions[0]?.reason ?? null,
       contact: {
         id: r.contact.id,
         name: `${r.contact.firstName} ${r.contact.lastName}`.trim(),
+        firstName: r.contact.firstName,
+        lastName: r.contact.lastName,
+        email: r.contact.email,
+        mobileNumber: r.contact.mobileNumber,
+        whatsappNumber: r.contact.whatsappNumber,
+        viberNumber: r.contact.viberNumber,
+        viberUserId: r.contact.viberUserId,
+        company: r.contact.company,
+        customerType: r.contact.customerType,
+        productInterest: r.contact.productInterest,
+        location: r.contact.location,
+        leadStatus: r.contact.leadStatus,
+        leadSource: r.contact.leadSource,
+        notes: r.contact.notes,
         address:
           campaign.channel === "EMAIL"
             ? r.contact.email
