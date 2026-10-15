@@ -1,4 +1,4 @@
-import type { CampaignStatus, Channel, Prisma } from "@prisma/client";
+import type { CampaignStatus, Channel, Prisma, RecipientStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
 import { recordAudit } from "./audit.service.js";
@@ -79,12 +79,35 @@ export async function archiveCampaign(id: string, actorId: string, archived: boo
   return campaign;
 }
 
+// Statuses that mean this recipient has already been completed/attempted for this campaign.
+// Crucially includes BOUNCED, OPENED, and CLICKED: if a send later bounces or opens, its status
+// transitions away from SENT — if we only excluded SENT and FAILED, every subsequent batch would
+// re-select and resend to those same contacts repeatedly until the daily limit was exhausted!
+const COMPLETED_RECIPIENT_STATUSES: RecipientStatus[] = [
+  "SENT",
+  "DELIVERED",
+  "FAILED",
+  "OPENED",
+  "CLICKED",
+  "UNSUBSCRIBED",
+  "SUPPRESSED",
+  "BOUNCED",
+];
+
+const SUCCESSFUL_SENT_STATUSES: RecipientStatus[] = [
+  "SENT",
+  "DELIVERED",
+  "OPENED",
+  "CLICKED",
+  "BOUNCED",
+];
+
 // Everyone this campaign's segment/channel would still reach that it hasn't already sent to —
 // shared by requestSend (what to actually attempt) and getCampaign (what to show as "remaining"
 // in the UI, so an admin closing and reopening the page still sees accurate batch progress).
-// A FAILED recipient is a real, completed attempt (the provider genuinely rejected it) — not
-// silently retried by a later "send"/"send next batch" call, only PENDING (never got a real
-// provider response, e.g. cut short by a daily-limit break) or never-attempted contacts are.
+// A FAILED, BOUNCED, or completed recipient is a real attempt — never silently retried by a later
+// "send next batch" call; only PENDING (never got a real provider response, e.g. cut short by a
+// daily-limit break) or never-attempted contacts are.
 async function buildUnsentRecipientsWhere(campaign: {
   id: string;
   segmentId: string | null;
@@ -96,7 +119,7 @@ async function buildUnsentRecipientsWhere(campaign: {
       buildRulesWhere(rulesSchema.parse(segment.rulesJson)),
       deliverableWhere(campaign.channel),
       channelAddressWhere(campaign.channel),
-      { campaignRecipients: { none: { campaignId: campaign.id, status: { in: ["SENT", "FAILED"] } } } },
+      { campaignRecipients: { none: { campaignId: campaign.id, status: { in: COMPLETED_RECIPIENT_STATUSES } } } },
     ],
   };
 }
@@ -105,7 +128,9 @@ export async function getCampaign(id: string) {
   const campaign = await prisma.campaign.findUnique({ where: { id }, include: campaignInclude });
   if (!campaign) throw new AppError(404, "Campaign not found");
 
-  const sentCount = await prisma.campaignRecipient.count({ where: { campaignId: id, status: "SENT" } });
+  const sentCount = await prisma.campaignRecipient.count({
+    where: { campaignId: id, status: { in: SUCCESSFUL_SENT_STATUSES } },
+  });
   // Only meaningful once a real send has started — cheap to skip for DRAFT/SCHEDULED/etc, and
   // trivially 0 once terminal (SENT/CANCELLED/FAILED never leave anything queued).
   const remainingCount =
@@ -605,7 +630,7 @@ export async function requestSend(
         throttledReason = isTokenExpired
           ? errorMessage
           : isDailyLimitError
-            ? `Stopped: today's daily sending limit has been reached. It resets at UTC midnight — try "Send next batch" again after that.`
+            ? `Stopped: today's daily sending limit has been reached. It resets at 8:00 AM PH time (UTC midnight) — you can also adjust your daily limit in Administration if your account has a higher limit.`
             : `Stopped: Gmail's short-term rate limit was reached (a separate, shorter-window limit from the daily one)${detailSuffix}. Retrying immediately resets Google's cooldown — please wait before clicking "Send next batch" again.`;
         break;
       }
@@ -637,7 +662,9 @@ export async function requestSend(
   // Cumulative across every batch this campaign has ever run, not just this call — a later batch
   // finishing off a large audience must still resolve to SENT if earlier batches already
   // succeeded, even if this particular call's own sentCount is 0.
-  const totalSentSoFar = await prisma.campaignRecipient.count({ where: { campaignId: id, status: "SENT" } });
+  const totalSentSoFar = await prisma.campaignRecipient.count({
+    where: { campaignId: id, status: { in: SUCCESSFUL_SENT_STATUSES } },
+  });
   const finalStatus: CampaignStatus = remainingCount > 0 ? "SENDING" : totalSentSoFar > 0 ? "SENT" : "FAILED";
 
   await prisma.campaign.update({

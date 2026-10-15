@@ -245,12 +245,13 @@ export async function getSendingLimits(): Promise<SendingLimitRow[]> {
       continue;
     }
     const config = readConfig(type, integration.config as string);
+    const actualSent = await getActualSentToday(type === "GMAIL" ? "EMAIL" : type);
     rows.push({
       type,
       connected: true,
       dailyLimit: config.dailyLimit ?? DEFAULTS[type],
       defaultDailyLimit: DEFAULTS[type],
-      sentToday: sentTodayIfCurrent(config),
+      sentToday: actualSent,
     });
   }
   return rows;
@@ -268,10 +269,16 @@ function readConfig(type: "GMAIL" | "WHATSAPP" | "VIBER", raw: string) {
   return readViberConfig(raw);
 }
 
-function sentTodayIfCurrent(config: { sentToday?: number; sentTodayDate?: string }): number | null {
+async function getActualSentToday(channel: "EMAIL" | "WHATSAPP" | "VIBER"): Promise<number> {
   const today = new Date().toISOString().slice(0, 10);
-  if (config.sentTodayDate !== today) return 0;
-  return config.sentToday ?? 0;
+  const startOfToday = new Date(`${today}T00:00:00.000Z`);
+  return prisma.campaignRecipient.count({
+    where: {
+      campaign: { channel },
+      sentAt: { gte: startOfToday },
+      status: { in: ["SENT", "DELIVERED", "OPENED", "CLICKED", "BOUNCED"] },
+    },
+  });
 }
 
 export async function updateSendingLimit(type: "GMAIL" | "WHATSAPP" | "VIBER", dailyLimit: number, actorId: string) {
@@ -280,16 +287,19 @@ export async function updateSendingLimit(type: "GMAIL" | "WHATSAPP" | "VIBER", d
     throw new AppError(409, `No connected ${type} integration to set a limit on.`);
   }
 
+  const today = new Date().toISOString().slice(0, 10);
+  const actualSentToday = await getActualSentToday(type === "GMAIL" ? "EMAIL" : type);
+
   let nextConfig: string;
   if (type === "GMAIL") {
     const config = readGmailConfig(integration.config as string);
-    nextConfig = encryptGmailConfig({ ...config, dailyLimit });
+    nextConfig = encryptGmailConfig({ ...config, dailyLimit, sentToday: actualSentToday, sentTodayDate: today });
   } else if (type === "WHATSAPP") {
     const config = readWhatsAppConfig(integration.config as string);
-    nextConfig = encryptWhatsAppConfig({ ...config, dailyLimit });
+    nextConfig = encryptWhatsAppConfig({ ...config, dailyLimit, sentToday: actualSentToday, sentTodayDate: today });
   } else {
     const config = readViberConfig(integration.config as string);
-    nextConfig = encryptViberConfig({ ...config, dailyLimit });
+    nextConfig = encryptViberConfig({ ...config, dailyLimit, sentToday: actualSentToday, sentTodayDate: today });
   }
 
   await prisma.integration.update({ where: { id: integration.id }, data: { config: nextConfig } });

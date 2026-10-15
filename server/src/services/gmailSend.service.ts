@@ -27,16 +27,31 @@ async function loadConnectedGmail() {
 // we should stop cleanly before that, not retry into it.
 async function reserveSendSlot(integrationId: string, config: ReturnType<typeof readGmailConfig>) {
   const today = todayUTC();
-  const sentToday = config.sentTodayDate === today ? config.sentToday : 0;
+  let sentToday = config.sentTodayDate === today ? config.sentToday : 0;
   const limit = config.dailyLimit ?? DEFAULT_DAILY_LIMIT;
 
   if (sentToday >= limit) {
-    throw new AppError(
-      429,
-      `Daily Gmail sending limit reached (${limit} messages/24h) — raise it in Administration once ` +
-        `you've confirmed a higher tier (e.g. switching to a Google Workspace account), or wait for ` +
-        `the limit to reset.`,
-    );
+    // Before blocking, verify against actual database records for today to self-heal any
+    // counter drift or duplicate increments
+    const startOfToday = new Date(`${today}T00:00:00.000Z`);
+    const actualSentToday = await prisma.campaignRecipient.count({
+      where: {
+        campaign: { channel: "EMAIL" },
+        sentAt: { gte: startOfToday },
+        status: { in: ["SENT", "DELIVERED", "OPENED", "CLICKED", "BOUNCED"] },
+      },
+    });
+
+    if (actualSentToday < limit) {
+      sentToday = actualSentToday;
+    } else {
+      throw new AppError(
+        429,
+        `Daily Gmail sending limit reached (${limit} messages/24h) — raise it in Administration once ` +
+          `you've confirmed a higher tier (e.g. switching to a Google Workspace account), or wait for ` +
+          `the limit to reset at 8:00 AM PH time (UTC midnight).`,
+      );
+    }
   }
 
   const nextConfig = { ...config, sentToday: sentToday + 1, sentTodayDate: today };
