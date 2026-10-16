@@ -182,6 +182,9 @@ export interface StoredGmailConfig {
   // Shown to recipients as the sender in their inbox ("Nissan Cebu Dealer <address@gmail.com>")
   // instead of the raw address — falls back to the address itself when unset.
   senderName?: string;
+  // Provider rate-limit cooldown timestamp (ISO string) when Google returns 429 userRateLimitExceeded
+  throttledUntil?: string;
+  throttledReason?: string;
 }
 
 export function readGmailConfig(encryptedConfig: string): StoredGmailConfig {

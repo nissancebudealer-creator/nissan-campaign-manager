@@ -160,6 +160,23 @@ interface SendEmailInput {
 
 export async function sendEmailViaGmail(input: SendEmailInput): Promise<{ providerMessageId: string }> {
   const { integration, config } = await loadConnectedGmail();
+
+  if (config.throttledUntil) {
+    const unlockMs = new Date(config.throttledUntil).getTime();
+    if (!Number.isNaN(unlockMs) && unlockMs > Date.now()) {
+      const phTime = new Date(unlockMs).toLocaleTimeString("en-US", {
+        timeZone: "Asia/Manila",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+      throw new AppError(
+        429,
+        `Gmail rate limit cooldown active [retry after ${phTime} PH time] {unlock:${config.throttledUntil}}: Google's 15-minute sending cooldown is still in effect. Retrying immediately resets Google's cooldown.`,
+      );
+    }
+  }
+
   await reserveSendSlot(integration.id, config);
 
   try {
@@ -203,6 +220,25 @@ export async function sendEmailViaGmail(input: SendEmailInput): Promise<{ provid
       try {
         const { data } = await gmail.users.messages.send({ userId: "me", requestBody: { raw } });
         if (!data.id) throw new Error("Gmail API returned no message id");
+
+        if (config.throttledUntil) {
+          prisma.integration
+            .findUnique({ where: { id: integration.id } })
+            .then((current) => {
+              if (!current?.config) return;
+              const latest = readGmailConfig(current.config as string);
+              if (latest.throttledUntil) {
+                delete latest.throttledUntil;
+                delete latest.throttledReason;
+                return prisma.integration.update({
+                  where: { id: integration.id },
+                  data: { config: encryptSecret(JSON.stringify(latest)) },
+                });
+              }
+            })
+            .catch(() => {});
+        }
+
         return { providerMessageId: data.id };
       } catch (err) {
         lastError = err;
@@ -218,9 +254,34 @@ export async function sendEmailViaGmail(input: SendEmailInput): Promise<{ provid
       // recipients untouched, the same as hitting our own daily-limit counter — rather than a
       // per-recipient rejection.
       const detail = extractRateLimitDetail(lastError);
-      const detailSuffix = detail?.formattedText ? ` [${detail.formattedText}]` : "";
-      const unlockSuffix = detail?.unlockIso ? ` {unlock:${detail.unlockIso}}` : "";
-      throw new AppError(429, `Gmail rate limit reached${detailSuffix}${unlockSuffix}: ${message}`);
+      const unlockIso = detail?.unlockIso || new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      const phTime = new Date(unlockIso).toLocaleTimeString("en-US", {
+        timeZone: "Asia/Manila",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+      const formattedText = `retry after ${phTime} PH time`;
+
+      try {
+        const current = await prisma.integration.findUnique({ where: { id: integration.id } });
+        if (current?.config) {
+          const latest = readGmailConfig(current.config as string);
+          const updated = {
+            ...latest,
+            throttledUntil: unlockIso,
+            throttledReason: formattedText,
+          };
+          await prisma.integration.update({
+            where: { id: integration.id },
+            data: { config: encryptSecret(JSON.stringify(updated)) },
+          });
+        }
+      } catch (persistErr) {
+        console.error("Failed to persist throttledUntil to integration config:", persistErr);
+      }
+
+      throw new AppError(429, `Gmail rate limit reached [${formattedText}] {unlock:${unlockIso}}: ${message}`);
     }
     // invalid_grant means Google revoked or expired the OAuth refresh token — most commonly because
     // the OAuth app is still in "Testing" mode (tokens auto-expire every 7 days), or because the

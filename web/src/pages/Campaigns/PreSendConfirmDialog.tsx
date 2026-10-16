@@ -15,7 +15,8 @@ interface PreSendConfirmDialogProps {
 const CHANNEL_LABELS: Record<string, string> = { EMAIL: "Email", WHATSAPP: "WhatsApp", VIBER: "Viber" };
 
 function formatMessageTimestamps(msg: string): string {
-  return msg.replace(/\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)\b/g, (_, iso) => {
+  const cleaned = msg.replace(/\s*\{unlock:[^}]+\}/g, "");
+  return cleaned.replace(/\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)\b/g, (_, iso) => {
     const withZ = iso.endsWith("Z") ? iso : iso + "Z";
     const date = new Date(withZ);
     if (Number.isNaN(date.getTime())) return iso;
@@ -48,6 +49,21 @@ export function PreSendConfirmDialog({
   const [cooldownRemaining, setCooldownRemaining] = useState<number>(0);
   const [failedRecipients, setFailedRecipients] = useState<RecipientLogEntry[]>([]);
   const [showFailureLog, setShowFailureLog] = useState(false);
+
+  useEffect(() => {
+    if (open && campaign?.throttledUntil) {
+      const unlockMs = new Date(campaign.throttledUntil).getTime();
+      if (!Number.isNaN(unlockMs) && unlockMs > Date.now()) {
+        setThrottledUntil(campaign.throttledUntil);
+        if (campaign.throttledReason && !result) {
+          setResult({
+            type: "warning",
+            message: campaign.throttledReason,
+          });
+        }
+      }
+    }
+  }, [open, campaign?.throttledUntil, campaign?.throttledReason]);
 
   useEffect(() => {
     if (!throttledUntil) {
@@ -120,10 +136,16 @@ export function PreSendConfirmDialog({
         onSent?.();
       }
     } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Could not send this campaign.";
+      const unlockMatch = msg.match(/\{unlock:(.*?)\}/);
+      if (unlockMatch) {
+        setThrottledUntil(unlockMatch[1]);
+      }
       setResult({
         type: "error",
-        message: err instanceof ApiError ? err.message : "Could not send this campaign.",
+        message: msg,
       });
+      onSent?.();
     } finally {
       setSending(false);
     }

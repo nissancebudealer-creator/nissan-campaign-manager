@@ -10,6 +10,7 @@ import { renderPersonalization } from "../config/personalization.js";
 import { renderEmailHtml } from "../lib/renderEmailHtml.js";
 import { buildUnsubscribeUrl } from "./unsubscribe.service.js";
 import { sendEmailViaGmail } from "./gmailSend.service.js";
+import { readGmailConfig } from "./gmailAuth.service.js";
 import { SEND_DELAY_MS } from "../config/gmailLimits.js";
 import { buildClickUrl, buildOpenPixelUrl } from "./tracking.service.js";
 import { sendWhatsAppTemplateMessage } from "./whatsapp.service.js";
@@ -138,7 +139,30 @@ export async function getCampaign(id: string) {
       ? await prisma.contact.count({ where: await buildUnsentRecipientsWhere(campaign) })
       : 0;
 
-  return { ...campaign, sentCount, remainingCount };
+  let throttledUntil: string | undefined;
+  let throttledReason: string | undefined;
+
+  if (campaign.channel === "EMAIL") {
+    const integration = await prisma.integration.findFirst({
+      where: { type: "GMAIL", status: "CONNECTED" },
+    });
+    if (integration?.config) {
+      try {
+        const config = readGmailConfig(integration.config as string);
+        if (config.throttledUntil) {
+          const unlockMs = new Date(config.throttledUntil).getTime();
+          if (!Number.isNaN(unlockMs) && unlockMs > Date.now()) {
+            throttledUntil = config.throttledUntil;
+            throttledReason = config.throttledReason;
+          }
+        }
+      } catch {
+        // ignore config parsing errors
+      }
+    }
+  }
+
+  return { ...campaign, sentCount, remainingCount, throttledUntil, throttledReason };
 }
 
 export async function createCampaign(input: CampaignInput, actorId: string) {
@@ -451,6 +475,42 @@ export async function requestSend(
       `No connected ${existing.channel} integration. Connect one in Integrations before sending — ` +
         `this platform never simulates a send or fabricates delivery data.`,
     );
+  }
+
+  if (existing.channel === "EMAIL" && integration.config) {
+    try {
+      const config = readGmailConfig(integration.config as string);
+      if (config.throttledUntil) {
+        const unlockMs = new Date(config.throttledUntil).getTime();
+        if (!Number.isNaN(unlockMs) && unlockMs > Date.now()) {
+          const phTime = new Date(unlockMs).toLocaleTimeString("en-US", {
+            timeZone: "Asia/Manila",
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          });
+          const throttledReason = `Stopped: Gmail's short-term rate limit was reached (a separate, shorter-window limit from the daily one) (retry after ${phTime} PH time). Retrying immediately resets Google's cooldown — please wait before clicking "Send next batch" again.`;
+
+          if (options.testMode) {
+            throw new AppError(429, throttledReason);
+          }
+
+          const remainingCount = existing.segmentId
+            ? await prisma.contact.count({ where: await buildUnsentRecipientsWhere(existing) })
+            : 0;
+
+          return {
+            sentCount: 0,
+            failedCount: 0,
+            remainingCount,
+            throttledReason,
+            throttledUntil: config.throttledUntil,
+          };
+        }
+      }
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+    }
   }
 
   if (options.testMode) {

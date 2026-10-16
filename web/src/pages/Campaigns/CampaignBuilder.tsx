@@ -64,6 +64,7 @@ export function CampaignBuilder() {
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmTestMode, setConfirmTestMode] = useState(false);
+  const [cooldownRemaining, setCooldownRemaining] = useState<number>(0);
 
   const status = campaign?.status ?? "DRAFT";
   const editable = EDITABLE_STATUSES.includes(status);
@@ -73,6 +74,20 @@ export function CampaignBuilder() {
   const integrationConnected = integrations.some(
     (i) => i.type === CHANNEL_TO_INTEGRATION_TYPE[channel] && i.status === "CONNECTED",
   );
+
+  useEffect(() => {
+    if (!campaign?.throttledUntil) {
+      setCooldownRemaining(0);
+      return;
+    }
+    function updateCooldown() {
+      const diff = Math.ceil((new Date(campaign!.throttledUntil!).getTime() - Date.now()) / 1000);
+      setCooldownRemaining(diff > 0 ? diff : 0);
+    }
+    updateCooldown();
+    const interval = setInterval(updateCooldown, 1000);
+    return () => clearInterval(interval);
+  }, [campaign?.throttledUntil]);
 
   useEffect(() => {
     segmentsApi.list().then((r) => setSegments(r.segments));
@@ -561,20 +576,30 @@ export function CampaignBuilder() {
                     : "."}
                 </p>
               )}
+            {cooldownRemaining > 0 && (
+              <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                ⏳ Gmail rate-limit cooldown active ({Math.floor(cooldownRemaining / 60)}m {cooldownRemaining % 60}s remaining).
+                Retrying immediately resets Google's cooldown — sending is temporarily paused until cooldown finishes.
+              </div>
+            )}
             <div className="mt-2 flex flex-wrap gap-2">
               <button
                 onClick={() => openSendConfirm(true)}
-                disabled={!canSend}
+                disabled={!canSend || cooldownRemaining > 0}
                 className="rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
               >
                 Test send
               </button>
               <button
                 onClick={() => openSendConfirm(false)}
-                disabled={!canSend}
+                disabled={!canSend || cooldownRemaining > 0}
                 className="rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
               >
-                {status === "SENDING" ? "Send next batch" : "Send now"}
+                {cooldownRemaining > 0
+                  ? `Cooldown (${Math.floor(cooldownRemaining / 60)}m ${cooldownRemaining % 60}s)`
+                  : status === "SENDING"
+                    ? "Send next batch"
+                    : "Send now"}
               </button>
               {editable && (status === "DRAFT" || status === "PAUSED" || status === "SCHEDULED") && (
                 <button

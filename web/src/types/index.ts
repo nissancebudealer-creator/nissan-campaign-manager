@@ -208,6 +208,8 @@ export interface Campaign {
   // CampaignRecipient rows, not part of what's persisted on the Campaign row itself.
   sentCount?: number;
   remainingCount?: number;
+  throttledUntil?: string;
+  throttledReason?: string;
 }
 
 export interface CampaignInput {
