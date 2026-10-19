@@ -4,7 +4,7 @@ import { encryptSecret } from "../lib/crypto.js";
 import { AppError } from "../utils/AppError.js";
 import { buildMimeMessage, formatDisplayAddress } from "../lib/mime.js";
 import { clientFromStoredConfig, readGmailConfig } from "./gmailAuth.service.js";
-import { DEFAULT_DAILY_LIMIT, MAX_SEND_RETRIES, RETRY_BASE_DELAY_MS } from "../config/gmailLimits.js";
+import { DEFAULT_DAILY_LIMIT, GMAIL_DAILY_LIMITS, MAX_SEND_RETRIES, RETRY_BASE_DELAY_MS } from "../config/gmailLimits.js";
 
 function todayUTC(): string {
   return new Date().toISOString().slice(0, 10);
@@ -21,40 +21,79 @@ async function loadConnectedGmail() {
   return { integration, config };
 }
 
-// Resets the counter if the stored date has rolled over, then refuses if today's count is already
-// at Gmail's documented daily ceiling — see gmailLimits.ts. This is enforced here, not just
-// displayed in the UI, because Google will start hard-rejecting sends past this point anyway and
-// we should stop cleanly before that, not retry into it.
+// Google enforces Gmail API sending limits based on a strict ROLLING 24-HOUR window rather than a
+// calendar-day reset. For personal @gmail.com accounts, the hard ceiling is 500/24h. We check
+// the actual sends in the past 24 hours (now - 24h) and, if at capacity, compute the exact time
+// when the earliest send in the window will age past 24 hours, freeing up slots.
 async function reserveSendSlot(integrationId: string, config: ReturnType<typeof readGmailConfig>) {
-  const today = todayUTC();
-  let sentToday = config.sentTodayDate === today ? config.sentToday : 0;
-  const limit = config.dailyLimit ?? DEFAULT_DAILY_LIMIT;
+  const isConsumerGmail =
+    config.email.toLowerCase().endsWith("@gmail.com") || config.email.toLowerCase().endsWith("@googlemail.com");
+  const ceiling = isConsumerGmail ? GMAIL_DAILY_LIMITS.CONSUMER : GMAIL_DAILY_LIMITS.WORKSPACE;
+  const limit = Math.min(config.dailyLimit ?? DEFAULT_DAILY_LIMIT, ceiling);
 
-  if (sentToday >= limit) {
-    // Before blocking, verify against actual database records for today to self-heal any
-    // counter drift or duplicate increments
-    const startOfToday = new Date(`${today}T00:00:00.000Z`);
-    const actualSentToday = await prisma.campaignRecipient.count({
+  const rolling24hAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const sentInLast24h = await prisma.campaignRecipient.count({
+    where: {
+      campaign: { channel: "EMAIL" },
+      sentAt: { gte: rolling24hAgo },
+      status: { in: ["SENT", "DELIVERED", "OPENED", "CLICKED", "BOUNCED"] },
+    },
+  });
+
+  if (sentInLast24h >= limit) {
+    const oldestSend = await prisma.campaignRecipient.findFirst({
       where: {
         campaign: { channel: "EMAIL" },
-        sentAt: { gte: startOfToday },
+        sentAt: { gte: rolling24hAgo },
         status: { in: ["SENT", "DELIVERED", "OPENED", "CLICKED", "BOUNCED"] },
       },
+      orderBy: { sentAt: "asc" },
+      select: { sentAt: true },
     });
 
-    if (actualSentToday < limit) {
-      sentToday = actualSentToday;
-    } else {
-      throw new AppError(
-        429,
-        `Daily Gmail sending limit reached (${limit} messages/24h) — raise it in Administration once ` +
-          `you've confirmed a higher tier (e.g. switching to a Google Workspace account), or wait for ` +
-          `the limit to reset at 8:00 AM PH time (UTC midnight).`,
-      );
+    const unlockDate = oldestSend?.sentAt
+      ? new Date(oldestSend.sentAt.getTime() + 24 * 60 * 60 * 1000)
+      : new Date(Date.now() + 60 * 60 * 1000);
+
+    const phTime = unlockDate.toLocaleTimeString("en-US", {
+      timeZone: "Asia/Manila",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+    const phDate = unlockDate.toLocaleDateString("en-US", {
+      timeZone: "Asia/Manila",
+      month: "short",
+      day: "numeric",
+    });
+
+    const unlockIso = unlockDate.toISOString();
+    const formattedText = `retry after ${phTime} PH time (${phDate})`;
+    const throttledReason = `Stopped: Daily Gmail sending limit reached (${sentInLast24h}/${limit} messages sent in rolling 24h window). Google's 24-hour quota resets as earlier messages roll off — slots unlock at ${phTime} PH time (${phDate}).`;
+
+    try {
+      const updated = {
+        ...config,
+        sentToday: sentInLast24h,
+        throttledUntil: unlockIso,
+        throttledReason,
+      };
+      await prisma.integration.update({
+        where: { id: integrationId },
+        data: { config: encryptSecret(JSON.stringify(updated)) },
+      });
+    } catch {
+      // ignore
     }
+
+    throw new AppError(
+      429,
+      `${throttledReason} [${formattedText}] {unlock:${unlockIso}}`,
+    );
   }
 
-  const nextConfig = { ...config, sentToday: sentToday + 1, sentTodayDate: today };
+  const today = todayUTC();
+  const nextConfig = { ...config, sentToday: sentInLast24h + 1, sentTodayDate: today };
   await prisma.integration.update({
     where: { id: integrationId },
     data: { config: encryptSecret(JSON.stringify(nextConfig)) },

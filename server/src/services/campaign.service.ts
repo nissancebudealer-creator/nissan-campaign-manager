@@ -489,7 +489,9 @@ export async function requestSend(
             minute: "2-digit",
             hour12: true,
           });
-          const throttledReason = `Stopped: Gmail's short-term rate limit was reached (a separate, shorter-window limit from the daily one) (retry after ${phTime} PH time). Retrying immediately resets Google's cooldown — please wait before clicking "Send next batch" again.`;
+          const throttledReason =
+            config.throttledReason ||
+            `Stopped: Gmail rate limit cooldown active (retry after ${phTime} PH time). Retrying immediately resets Google's cooldown — please wait before clicking "Send next batch" again.`;
 
           if (options.testMode) {
             throw new AppError(429, throttledReason);
@@ -690,7 +692,7 @@ export async function requestSend(
         throttledReason = isTokenExpired
           ? errorMessage
           : isDailyLimitError
-            ? `Stopped: today's daily sending limit has been reached. It resets at 8:00 AM PH time (UTC midnight) — you can also adjust your daily limit in Administration if your account has a higher limit.`
+            ? errorMessage.replace(/\{unlock:.*?\}/g, "").replace(/\[.*?\]/g, "").trim()
             : `Stopped: Gmail's short-term rate limit was reached (a separate, shorter-window limit from the daily one)${detailSuffix}. Retrying immediately resets Google's cooldown — please wait before clicking "Send next batch" again.`;
         break;
       }

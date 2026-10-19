@@ -295,7 +295,7 @@ export function PreSendConfirmDialog({
               {sending
                 ? "Sending…"
                 : cooldownRemaining > 0
-                  ? `Cooldown (${Math.floor(cooldownRemaining / 60)}m ${cooldownRemaining % 60}s)`
+                  ? `Cooldown (${formatCooldownTime(cooldownRemaining)})`
                   : isResume
                     ? "Send next batch"
                     : "Confirm and send"}
@@ -314,4 +314,15 @@ function Row({ label, value, emphasize }: { label: string; value: string; emphas
       <dd className={emphasize ? "font-semibold text-slate-900" : "text-slate-700"}>{value}</dd>
     </div>
   );
+}
+
+function formatCooldownTime(seconds: number): string {
+  if (seconds <= 0) return "0s";
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${secs}s`;
+  }
+  return `${minutes}m ${secs}s`;
 }

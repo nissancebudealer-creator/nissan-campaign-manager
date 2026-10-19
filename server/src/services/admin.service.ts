@@ -270,12 +270,14 @@ function readConfig(type: "GMAIL" | "WHATSAPP" | "VIBER", raw: string) {
 }
 
 async function getActualSentToday(channel: "EMAIL" | "WHATSAPP" | "VIBER"): Promise<number> {
-  const today = new Date().toISOString().slice(0, 10);
-  const startOfToday = new Date(`${today}T00:00:00.000Z`);
+  const gte =
+    channel === "EMAIL"
+      ? new Date(Date.now() - 24 * 60 * 60 * 1000)
+      : new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
   return prisma.campaignRecipient.count({
     where: {
       campaign: { channel },
-      sentAt: { gte: startOfToday },
+      sentAt: { gte },
       status: { in: ["SENT", "DELIVERED", "OPENED", "CLICKED", "BOUNCED"] },
     },
   });
@@ -293,6 +295,15 @@ export async function updateSendingLimit(type: "GMAIL" | "WHATSAPP" | "VIBER", d
   let nextConfig: string;
   if (type === "GMAIL") {
     const config = readGmailConfig(integration.config as string);
+    const isConsumer =
+      config.email.toLowerCase().endsWith("@gmail.com") || config.email.toLowerCase().endsWith("@googlemail.com");
+    if (isConsumer && dailyLimit > 500) {
+      throw new AppError(
+        400,
+        `Personal @gmail.com accounts have a hard Google quota ceiling of 500 messages per rolling 24 hours. ` +
+          `Setting this above 500 causes Google to hard-reject sends. To send up to 2,000/day, connect a Google Workspace account.`,
+      );
+    }
     nextConfig = encryptGmailConfig({ ...config, dailyLimit, sentToday: actualSentToday, sentTodayDate: today });
   } else if (type === "WHATSAPP") {
     const config = readWhatsAppConfig(integration.config as string);

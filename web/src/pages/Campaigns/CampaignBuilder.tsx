@@ -577,9 +577,13 @@ export function CampaignBuilder() {
                 </p>
               )}
             {cooldownRemaining > 0 && (
-              <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
-                ⏳ Gmail rate-limit cooldown active ({Math.floor(cooldownRemaining / 60)}m {cooldownRemaining % 60}s remaining).
-                Retrying immediately resets Google's cooldown — sending is temporarily paused until cooldown finishes.
+              <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
+                <div className="font-semibold text-amber-900">
+                  ⏳ {campaign?.throttledReason ? campaign.throttledReason.replace(/\{unlock:.*?\}/g, "").replace(/\[.*?\]/g, "").trim() : "Gmail sending cooldown active."}
+                </div>
+                <div className="mt-1 text-amber-700">
+                  Sending is automatically paused until slots become available: <strong>{formatCooldownTime(cooldownRemaining)} remaining</strong>.
+                </div>
               </div>
             )}
             <div className="mt-2 flex flex-wrap gap-2">
@@ -596,7 +600,7 @@ export function CampaignBuilder() {
                 className="rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
               >
                 {cooldownRemaining > 0
-                  ? `Cooldown (${Math.floor(cooldownRemaining / 60)}m ${cooldownRemaining % 60}s)`
+                  ? `Cooldown (${formatCooldownTime(cooldownRemaining)})`
                   : status === "SENDING"
                     ? "Send next batch"
                     : "Send now"}
@@ -663,4 +667,15 @@ function NO_ADDRESS_LABEL(channel: ConsentChannel) {
   if (channel === "EMAIL") return "no email on file";
   if (channel === "WHATSAPP") return "no WhatsApp number on file";
   return "not yet subscribed on Viber";
+}
+
+function formatCooldownTime(seconds: number): string {
+  if (seconds <= 0) return "0s";
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${secs}s`;
+  }
+  return `${minutes}m ${secs}s`;
 }
